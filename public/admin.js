@@ -585,6 +585,7 @@ const ADMIN_SECTION_SLUGS = {
   settings: 'ayarlar',
   logs: 'loglar',
   'route-logs': 'route-loglari',
+  firewall: 'guvenlik-duvari',
   'authority-logs': 'yetkili-loglari'
 };
 const ADMIN_SLUG_SECTIONS = Object.fromEntries(Object.entries(ADMIN_SECTION_SLUGS).map(([section, slug]) => [slug, section]));
@@ -847,7 +848,7 @@ function loadSection(section, { history: historyMode = 'push' } = {}) {
     journalists: renderJournalists, 'newspaper-settings': renderNewspaperSettings,
     'account-deletions': renderAccountDeletions,
     forums: renderForums, books: renderBooks, poems: renderPoems, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, 'reals-ads': renderRealsAds, groups: renderGroups, artists: renderArtists,
-    levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, 'authority-logs': renderAuthorityLogs,
+    levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, firewall: renderFirewall, 'authority-logs': renderAuthorityLogs,
     settings: renderSettings, messages: renderAdminMessages, 'message-reports': renderMessageReports,
     'user-reports': renderUserReports, 'child-safety': renderChildSafetySettings, warnings: renderWarnings,
     notifications: renderAdminNotifications,
@@ -3501,6 +3502,600 @@ async function renderRouteLogs(main) {
   const render = rows => rows.length ? rows.map(log => { let detail = {}; try { detail = JSON.parse(log.detail || '{}'); } catch {} const place = [log.city, log.country].filter(Boolean).join(', ') || 'Konum yok'; return `<div class="route-log-row"><div class="route-log-main"><span class="route-log-user"><i class="fas fa-user"></i>${escHtml(log.actor || 'anonymous')}</span><span class="route-log-route">${escHtml(log.target || '—')}</span><span class="route-log-arrow"><i class="fas fa-arrow-right"></i></span><span class="route-log-redirect">${escHtml(detail.redirectTarget || '—')}</span></div><div class="route-log-meta"><span><i class="fas fa-network-wired"></i>${escHtml(log.ip || '—')}</span><span><i class="fas fa-mobile-screen"></i>${escHtml(log.device || '—')}</span><span><i class="fas fa-desktop"></i>${escHtml(log.operating_system || '—')}</span><span><i class="fas fa-location-dot"></i>${escHtml(place)}</span><span title="${escHtml(log.user_agent || '')}"><i class="fas fa-globe"></i>User-Agent</span><span><i class="fas fa-clock"></i>${formatDate(log.created_at)}</span><span><i class="fas fa-shield-halved"></i>${escHtml(detail.matchedRoute || '—')}</span></div></div>`; }).join('') : '<div style="padding:36px;text-align:center;color:var(--text3)">Route denemesi bulunamadı</div>';
   main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-route"></i></div> Route Log <span style="font-size:13px;font-weight:400;color:var(--text2)">(${logs.length})</span></div><div class="adm-search"><i class="fas fa-search"></i><input id="route-log-search" type="text" placeholder="Kullanıcı, IP, route, tarih veya hedef ara..." style="min-width:300px"></div></div><div class="card"><div id="route-logs-list">${render(logs)}</div></div>`;
   $('#route-log-search').addEventListener('input', event => { const q = event.target.value.toLowerCase(); $('#route-logs-list').innerHTML = render(logs.filter(log => JSON.stringify(log).toLowerCase().includes(q) || getRedirect(log).toLowerCase().includes(q))); });
+}
+
+
+// =========================================================================
+// GÜVENLİK DUVARI PANELİ
+// Sekmeler: Özet · Olaylar · Yasaklılar · Kurallar · İzin listesi · Ayarlar
+// =========================================================================
+const FIREWALL_ACTION_LABELS = {
+  log: 'Kaydedildi', monitor: 'İzlendi', blocked: 'Engellendi', banned: 'Yasaklandı', block: 'Engel', ban: 'Yasak'
+};
+const FIREWALL_SEVERITY_LABELS = { 1: 'Bilgi', 2: 'Düşük', 3: 'Orta', 4: 'Yüksek', 5: 'Kritik' };
+let firewallState = { tab: 'overview', config: null, categories: {}, filters: { since: 24, q: '', category: '', action: '' } };
+
+function fwBadge(action) {
+  const key = String(action || 'log');
+  const tone = key === 'banned' || key === 'ban' ? 'danger' : key === 'blocked' || key === 'block' ? 'warn' : key === 'monitor' ? 'info' : 'muted';
+  return `<span class="fw-badge fw-badge--${tone}">${escHtml(FIREWALL_ACTION_LABELS[key] || key)}</span>`;
+}
+
+function fwSeverityDot(level) {
+  const value = Math.max(1, Math.min(5, Number(level) || 1));
+  return `<span class="fw-sev fw-sev--${value}" title="${escHtml(FIREWALL_SEVERITY_LABELS[value])}"></span>`;
+}
+
+async function renderFirewall(main) {
+  let payload;
+  try { payload = await adminApi('/firewall/config'); }
+  catch (error) { main.innerHTML = `<p style="color:var(--red2);padding:20px">${escHtml(error.message)}</p>`; return; }
+  firewallState.config = payload.config;
+  firewallState.categories = payload.categories;
+  firewallState.defaults = payload.defaults;
+
+  const config = payload.config;
+  const modeTone = !config.enabled || config.mode === 'off' ? 'off' : config.mode === 'monitor' ? 'monitor' : 'on';
+  const modeText = !config.enabled || config.mode === 'off' ? 'Kapalı'
+    : config.mode === 'monitor' ? 'İzleme modu — engellemiyor' : 'Aktif — saldırılar engelleniyor';
+
+  main.innerHTML = `
+    <div class="adm-section-header">
+      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-shield-virus"></i></div> Güvenlik Duvarı</div>
+      <div class="fw-head-actions">
+        <span class="fw-state fw-state--${modeTone}"><i class="fas fa-circle"></i>${escHtml(modeText)}</span>
+        <button class="btn btn-sm" id="fw-quick-toggle" type="button">
+          <i class="fas fa-power-off"></i> ${config.enabled && config.mode !== 'off' ? 'Kapat' : 'Aç'}
+        </button>
+      </div>
+    </div>
+    <div class="fw-tabs" role="tablist">
+      ${[['overview', 'Özet', 'chart-simple'], ['events', 'Olaylar', 'list-ul'], ['bans', 'Yasaklılar', 'ban'],
+         ['rules', 'Kurallar', 'filter'], ['allow', 'İzin listesi', 'user-check'], ['settings', 'Ayarlar', 'sliders']]
+        .map(([key, label, icon]) => `<button type="button" class="fw-tab${firewallState.tab === key ? ' is-active' : ''}" data-fw-tab="${key}"><i class="fas fa-${icon}"></i>${label}</button>`).join('')}
+    </div>
+    <div id="fw-pane"></div>`;
+
+  main.querySelectorAll('[data-fw-tab]').forEach(button => button.addEventListener('click', () => {
+    firewallState.tab = button.dataset.fwTab;
+    main.querySelectorAll('.fw-tab').forEach(tab => tab.classList.toggle('is-active', tab === button));
+    fwRenderPane();
+  }));
+
+  $('#fw-quick-toggle').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const turningOn = !(config.enabled && config.mode !== 'off');
+    button.disabled = true;
+    try {
+      await adminApi('/firewall/config', {
+        method: 'PUT',
+        body: JSON.stringify({ ...config, enabled: turningOn, mode: turningOn ? 'block' : 'off' })
+      });
+      toast(turningOn ? 'Güvenlik duvarı açıldı' : 'Güvenlik duvarı kapatıldı');
+      renderFirewall(main);
+    } catch (error) { toast(error.message, 'error'); button.disabled = false; }
+  });
+
+  fwRenderPane();
+}
+
+async function fwRenderPane() {
+  const pane = $('#fw-pane');
+  if (!pane) return;
+  pane.innerHTML = '<div class="card" style="padding:40px;text-align:center;color:var(--text3)">Yükleniyor…</div>';
+  try {
+    if (firewallState.tab === 'overview') return await fwOverview(pane);
+    if (firewallState.tab === 'events') return await fwEvents(pane);
+    if (firewallState.tab === 'bans') return await fwBans(pane);
+    if (firewallState.tab === 'rules') return await fwRules(pane);
+    if (firewallState.tab === 'allow') return await fwAllowlist(pane);
+    if (firewallState.tab === 'settings') return await fwSettings(pane);
+  } catch (error) {
+    pane.innerHTML = `<div class="card" style="padding:24px;color:var(--red2)">${escHtml(error.message)}</div>`;
+  }
+}
+
+// ── Özet ───────────────────────────────────────────────────────────────────
+async function fwOverview(pane) {
+  const data = await adminApi('/firewall/stats');
+  const totals = data.totals || {};
+  const peak = Math.max(1, ...data.timeline.map(row => row.total));
+  const card = (icon, label, value, hint) => `
+    <div class="fw-stat">
+      <span class="fw-stat-icon"><i class="fas fa-${icon}"></i></span>
+      <div><strong>${escHtml(String(value ?? 0))}</strong><small>${escHtml(label)}</small>
+      ${hint ? `<em>${escHtml(hint)}</em>` : ''}</div>
+    </div>`;
+
+  pane.innerHTML = `
+    <div class="fw-stats">
+      ${card('bolt', 'Son 1 saat', totals.last_hour, 'yakalanan deneme')}
+      ${card('calendar-day', 'Son 24 saat', totals.last_24h, 'yakalanan deneme')}
+      ${card('shield-halved', 'Engellenen', totals.blocked, 'toplam')}
+      ${card('network-wired', 'Farklı IP', totals.unique_ips, 'deneme yapan')}
+      ${card('ban', 'Aktif yasak', data.bans?.active, `${data.bans?.permanent || 0} kalıcı`)}
+      ${card('database', 'Toplam kayıt', totals.total, `kuyruk: ${data.runtime?.queue ?? 0}`)}
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-chart-column"></i> Son 24 saat</h3>
+      <div class="fw-spark">
+        ${data.timeline.length
+          ? data.timeline.map(row => `<span class="fw-spark-bar" style="height:${Math.max(4, Math.round(row.total / peak * 100))}%" title="${escHtml(row.hour)} · ${row.total} olay"></span>`).join('')
+          : '<p style="color:var(--text3);margin:0">Son 24 saatte olay yok.</p>'}
+      </div>
+    </div>
+
+    <div class="fw-two-col">
+      <div class="card fw-card">
+        <h3 class="fw-card-title"><i class="fas fa-layer-group"></i> Saldırı türleri <small>(7 gün)</small></h3>
+        ${data.by_category.length ? data.by_category.map(row => {
+          const max = data.by_category[0].total || 1;
+          const label = firewallState.categories?.[row.category]?.label || row.category || '—';
+          return `<div class="fw-bar-row"><span>${escHtml(label)}</span>
+            <span class="fw-bar"><span style="width:${Math.round(row.total / max * 100)}%"></span></span>
+            <b>${row.total}</b></div>`;
+        }).join('') : '<p style="color:var(--text3)">Kayıt yok.</p>'}
+      </div>
+      <div class="card fw-card">
+        <h3 class="fw-card-title"><i class="fas fa-user-secret"></i> En çok deneyen IP'ler <small>(7 gün)</small></h3>
+        ${data.top_ips.length ? `<div class="fw-iplist">${data.top_ips.map(row => `
+          <div class="fw-ip-row">
+            <div><code>${escHtml(row.ip)}</code>${row.country ? `<span class="fw-flag">${escHtml(row.country)}</span>` : ''}
+              <small>${escHtml((row.categories || []).filter(Boolean).map(key => firewallState.categories?.[key]?.label || key).join(' · ') || '—')}</small></div>
+            <div class="fw-ip-right"><b>${row.total}</b>
+              <button class="btn btn-sm btn-danger" data-fw-ban="${escHtml(row.ip)}" type="button"><i class="fas fa-ban"></i></button></div>
+          </div>`).join('')}</div>` : '<p style="color:var(--text3)">Kayıt yok.</p>'}
+      </div>
+    </div>`;
+
+  pane.querySelectorAll('[data-fw-ban]').forEach(button => button.addEventListener('click', async () => {
+    const ip = button.dataset.fwBan;
+    if (!confirm(`${ip} kalıcı olarak yasaklansın mı?`)) return;
+    try {
+      await adminApi('/firewall/bans', { method: 'POST', body: JSON.stringify({ ip, permanent: true, reason: 'Panelden eklendi' }) });
+      toast(`${ip} yasaklandı`);
+      fwRenderPane();
+    } catch (error) { toast(error.message, 'error'); }
+  }));
+}
+
+// ── Olaylar ────────────────────────────────────────────────────────────────
+async function fwEvents(pane) {
+  const filters = firewallState.filters;
+  const params = new URLSearchParams({ limit: '400', since: String(filters.since) });
+  if (filters.q) params.set('q', filters.q);
+  if (filters.category) params.set('category', filters.category);
+  if (filters.action) params.set('action', filters.action);
+  const events = await adminApi(`/firewall/events?${params}`);
+
+  const rows = events.length ? events.map(event => `
+    <div class="fw-event" data-fw-ip="${escHtml(event.ip)}">
+      <div class="fw-event-head">
+        ${fwSeverityDot(event.severity)}
+        ${fwBadge(event.action)}
+        <code class="fw-event-path">${escHtml(event.method)} ${escHtml(event.path)}${event.query_string ? '?' + escHtml(event.query_string) : ''}</code>
+        <span class="fw-event-time">${escHtml(formatDate(event.created_at))}</span>
+      </div>
+      <div class="fw-event-meta">
+        <span><i class="fas fa-network-wired"></i><code>${escHtml(event.ip)}</code></span>
+        <span><i class="fas fa-filter"></i>${escHtml(event.rule_label || event.rule_id)}</span>
+        <span><i class="fas fa-crosshairs"></i><code>${escHtml(event.matched || '—')}</code></span>
+        <span><i class="fas fa-plus-minus"></i>${event.score} puan</span>
+        ${event.country ? `<span><i class="fas fa-location-dot"></i>${escHtml([event.city, event.country].filter(Boolean).join(', '))}</span>` : ''}
+        <span><i class="fas fa-user"></i>${escHtml(event.actor || 'anonymous')}</span>
+      </div>
+      <details class="fw-event-more">
+        <summary>Tüm ayrıntılar</summary>
+        <dl>
+          <dt>User-Agent</dt><dd>${escHtml(event.user_agent || '—')}</dd>
+          <dt>Referer</dt><dd>${escHtml(event.referer || '—')}</dd>
+          <dt>Host</dt><dd>${escHtml(event.host || '—')}</dd>
+          <dt>Cihaz</dt><dd>${escHtml([event.device, event.operating_system].filter(Boolean).join(' · ') || '—')}</dd>
+          <dt>Kural</dt><dd><code>${escHtml(event.rule_id)}</code> · ${escHtml(firewallState.categories?.[event.category]?.label || event.category)}</dd>
+          <dt>Not</dt><dd>${escHtml(event.detail || '—')}</dd>
+        </dl>
+        <button class="btn btn-sm btn-danger" data-fw-ban-ip="${escHtml(event.ip)}" type="button"><i class="fas fa-ban"></i> Bu IP'yi yasakla</button>
+        <button class="btn btn-sm" data-fw-allow-ip="${escHtml(event.ip)}" type="button"><i class="fas fa-user-check"></i> İzin listesine al</button>
+      </details>
+    </div>`).join('') : '<div style="padding:40px;text-align:center;color:var(--text3)">Bu filtrede olay yok.</div>';
+
+  pane.innerHTML = `
+    <div class="card fw-filters">
+      <input type="search" id="fw-q" placeholder="IP, yol, kural veya User-Agent ara…" value="${escHtml(filters.q)}">
+      <select id="fw-cat"><option value="">Tüm türler</option>
+        ${Object.entries(firewallState.categories).map(([key, meta]) => `<option value="${escHtml(key)}"${filters.category === key ? ' selected' : ''}>${escHtml(meta.label)}</option>`).join('')}
+      </select>
+      <select id="fw-act"><option value="">Tüm sonuçlar</option>
+        ${['log', 'monitor', 'blocked', 'banned'].map(key => `<option value="${key}"${filters.action === key ? ' selected' : ''}>${escHtml(FIREWALL_ACTION_LABELS[key])}</option>`).join('')}
+      </select>
+      <select id="fw-since">
+        ${[[1, 'Son 1 saat'], [24, 'Son 24 saat'], [168, 'Son 7 gün'], [720, 'Son 30 gün']]
+          .map(([value, label]) => `<option value="${value}"${Number(filters.since) === value ? ' selected' : ''}>${label}</option>`).join('')}
+      </select>
+      <button class="btn btn-sm" id="fw-refresh" type="button"><i class="fas fa-rotate"></i> Yenile</button>
+      <span class="fw-count">${events.length} kayıt</span>
+    </div>
+    <div class="card fw-events">${rows}</div>`;
+
+  const apply = () => {
+    firewallState.filters = {
+      q: $('#fw-q').value.trim(),
+      category: $('#fw-cat').value,
+      action: $('#fw-act').value,
+      since: Number($('#fw-since').value) || 24
+    };
+    fwRenderPane();
+  };
+  let searchTimer = null;
+  $('#fw-q').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(apply, 350); });
+  ['#fw-cat', '#fw-act', '#fw-since'].forEach(selector => $(selector).addEventListener('change', apply));
+  $('#fw-refresh').addEventListener('click', fwRenderPane);
+
+  pane.querySelectorAll('[data-fw-ban-ip]').forEach(button => button.addEventListener('click', async () => {
+    const ip = button.dataset.fwBanIp;
+    if (!confirm(`${ip} kalıcı olarak yasaklansın mı?`)) return;
+    try { await adminApi('/firewall/bans', { method: 'POST', body: JSON.stringify({ ip, permanent: true, reason: 'Olay listesinden eklendi' }) }); toast(`${ip} yasaklandı`); fwRenderPane(); }
+    catch (error) { toast(error.message, 'error'); }
+  }));
+  pane.querySelectorAll('[data-fw-allow-ip]').forEach(button => button.addEventListener('click', async () => {
+    const ip = button.dataset.fwAllowIp;
+    try { await adminApi('/firewall/allowlist', { method: 'POST', body: JSON.stringify({ ip, note: 'Olay listesinden eklendi' }) }); toast(`${ip} izin listesine alındı`); }
+    catch (error) { toast(error.message, 'error'); }
+  }));
+}
+
+// ── Yasaklılar ─────────────────────────────────────────────────────────────
+async function fwBans(pane) {
+  const bans = await adminApi('/firewall/bans?limit=500');
+  pane.innerHTML = `
+    <div class="card fw-filters">
+      <input type="text" id="fw-ban-ip" placeholder="IP adresi (örn. 152.233.13.165)">
+      <input type="text" id="fw-ban-reason" placeholder="Neden (isteğe bağlı)">
+      <label class="fw-check"><input type="checkbox" id="fw-ban-perm" checked> Kalıcı</label>
+      <button class="btn btn-sm btn-danger" id="fw-ban-add" type="button"><i class="fas fa-ban"></i> Yasakla</button>
+      <span class="fw-count">${bans.length} kayıt</span>
+    </div>
+    <div class="card">
+      ${bans.length ? bans.map(ban => `
+        <div class="fw-event">
+          <div class="fw-event-head">
+            ${ban.permanent ? '<span class="fw-badge fw-badge--danger">Kalıcı</span>' : '<span class="fw-badge fw-badge--warn">Süreli</span>'}
+            <code class="fw-event-path">${escHtml(ban.ip)}</code>
+            <span class="fw-event-time">${ban.permanent ? 'süresiz' : escHtml(formatDate(ban.expires_at))}</span>
+          </div>
+          <div class="fw-event-meta">
+            <span><i class="fas fa-circle-info"></i>${escHtml(ban.reason || '—')}</span>
+            <span><i class="fas fa-layer-group"></i>${escHtml(firewallState.categories?.[ban.category]?.label || ban.category || '—')}</span>
+            <span><i class="fas fa-repeat"></i>${ban.hit_count} kez</span>
+            <span><i class="fas fa-user-shield"></i>${escHtml(ban.created_by || 'auto')}</span>
+            <span><i class="fas fa-clock"></i>${escHtml(formatDate(ban.created_at))}</span>
+            <button class="btn btn-sm" data-fw-unban="${ban.id}" type="button"><i class="fas fa-unlock"></i> Kaldır</button>
+          </div>
+        </div>`).join('') : '<div style="padding:40px;text-align:center;color:var(--text3)">Aktif yasak yok.</div>'}
+    </div>`;
+
+  $('#fw-ban-add').addEventListener('click', async () => {
+    const ip = $('#fw-ban-ip').value.trim();
+    if (!ip) return toast('IP adresi girin', 'error');
+    try {
+      await adminApi('/firewall/bans', { method: 'POST', body: JSON.stringify({ ip, reason: $('#fw-ban-reason').value.trim(), permanent: $('#fw-ban-perm').checked }) });
+      toast(`${ip} yasaklandı`); fwRenderPane();
+    } catch (error) { toast(error.message, 'error'); }
+  });
+  pane.querySelectorAll('[data-fw-unban]').forEach(button => button.addEventListener('click', async () => {
+    try { await adminApi(`/firewall/bans/${button.dataset.fwUnban}`, { method: 'DELETE' }); toast('Yasak kaldırıldı'); fwRenderPane(); }
+    catch (error) { toast(error.message, 'error'); }
+  }));
+}
+
+// ── Kurallar ───────────────────────────────────────────────────────────────
+async function fwRules(pane) {
+  const data = await adminApi('/firewall/rules');
+  const targets = { path: 'Yol', query: 'Sorgu', body: 'Gövde', ua: 'User-Agent', referer: 'Referer', any: 'Hepsi' };
+  pane.innerHTML = `
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-flask"></i> Kural testi</h3>
+      <p class="fw-hint">Bir istek yazın, motor gerçek trafikte olduğu gibi değerlendirsin. Hiçbir şey engellenmez.</p>
+      <div class="fw-test-grid">
+        <input type="text" id="fw-test-path" placeholder="/.env" value="/.env">
+        <input type="text" id="fw-test-query" placeholder="id=1 UNION SELECT…">
+        <input type="text" id="fw-test-ua" placeholder="User-Agent">
+        <button class="btn btn-sm" id="fw-test-run" type="button"><i class="fas fa-play"></i> Çalıştır</button>
+      </div>
+      <div id="fw-test-out"></div>
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-plus"></i> Özel kural ekle</h3>
+      <div class="fw-test-grid">
+        <input type="text" id="fw-rule-label" placeholder="Kural adı">
+        <input type="text" id="fw-rule-pattern" placeholder="Düzenli ifade, örn. \\/admin-eski">
+        <select id="fw-rule-target">${Object.entries(targets).map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select>
+        <select id="fw-rule-action"><option value="">Kategori varsayılanı</option><option value="log">Sadece logla</option><option value="block">Engelle</option><option value="ban">Yasakla</option></select>
+        <button class="btn btn-sm btn-primary" id="fw-rule-add" type="button"><i class="fas fa-check"></i> Ekle</button>
+      </div>
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-wrench"></i> Özel kurallar <small>(${data.custom.length})</small></h3>
+      ${data.custom.length ? data.custom.map(rule => `
+        <div class="fw-rule">
+          <label class="fw-check"><input type="checkbox" data-fw-rule-toggle="${rule.id}"${rule.enabled ? ' checked' : ''}></label>
+          <div><strong>${escHtml(rule.label)}</strong><code>${escHtml(rule.pattern)}</code>
+            <small>${escHtml(targets[rule.target] || rule.target)} · ${escHtml(firewallState.categories?.[rule.category]?.label || rule.category)}${rule.action ? ' · ' + escHtml(FIREWALL_ACTION_LABELS[rule.action] || rule.action) : ''}</small></div>
+          <button class="btn btn-sm btn-danger" data-fw-rule-del="${rule.id}" type="button"><i class="fas fa-trash"></i></button>
+        </div>`).join('') : '<p style="color:var(--text3)">Henüz özel kural yok. Yerleşik kurallar zaten çalışıyor.</p>'}
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-shield"></i> Yerleşik kurallar <small>(${data.builtin.length})</small></h3>
+      <p class="fw-hint">Bunlar koda gömülüdür ve silinemez; tür bazında Ayarlar sekmesinden kapatılabilir.</p>
+      <div class="fw-builtin">
+        ${data.builtin.map(rule => `<div class="fw-rule fw-rule--ro">
+          <div><strong>${escHtml(rule.label)}</strong><code>${escHtml(rule.pattern.length > 110 ? rule.pattern.slice(0, 110) + '…' : rule.pattern)}</code>
+          <small>${escHtml(targets[rule.target] || rule.target)} · ${escHtml(firewallState.categories?.[rule.category]?.label || rule.category)}</small></div>
+        </div>`).join('')}
+      </div>
+    </div>`;
+
+  $('#fw-test-run').addEventListener('click', async () => {
+    const out = $('#fw-test-out');
+    try {
+      const result = await adminApi('/firewall/test', {
+        method: 'POST',
+        body: JSON.stringify({ path: $('#fw-test-path').value, query: $('#fw-test-query').value, user_agent: $('#fw-test-ua').value })
+      });
+      out.innerHTML = `<div class="fw-test-result">
+        <p><strong>${result.hits.length}</strong> kural eşleşti · toplam <strong>${result.total_score}</strong> puan (eşik ${result.threshold}) →
+          ${result.would_ban ? '<span class="fw-badge fw-badge--danger">Yasaklanırdı</span>' : result.would_block ? '<span class="fw-badge fw-badge--warn">Engellenirdi</span>' : '<span class="fw-badge fw-badge--muted">Geçerdi</span>'}</p>
+        ${result.hits.map(hit => `<div class="fw-test-hit">${fwSeverityDot(hit.severity)}<code>${escHtml(hit.ruleId)}</code><span>${escHtml(hit.label)}</span><em>${escHtml(hit.matched)}</em><b>+${hit.score}</b></div>`).join('')}
+      </div>`;
+    } catch (error) { out.innerHTML = `<p style="color:var(--red2)">${escHtml(error.message)}</p>`; }
+  });
+
+  $('#fw-rule-add').addEventListener('click', async () => {
+    const label = $('#fw-rule-label').value.trim();
+    const pattern = $('#fw-rule-pattern').value.trim();
+    if (!label || !pattern) return toast('Kural adı ve desen gerekli', 'error');
+    try {
+      await adminApi('/firewall/rules', { method: 'POST', body: JSON.stringify({ label, pattern, target: $('#fw-rule-target').value, action: $('#fw-rule-action').value || undefined }) });
+      toast('Kural eklendi'); fwRenderPane();
+    } catch (error) { toast(error.message, 'error'); }
+  });
+  pane.querySelectorAll('[data-fw-rule-toggle]').forEach(input => input.addEventListener('change', async () => {
+    try { await adminApi(`/firewall/rules/${input.dataset.fwRuleToggle}`, { method: 'PATCH', body: JSON.stringify({ enabled: input.checked }) }); toast('Kural güncellendi'); }
+    catch (error) { toast(error.message, 'error'); input.checked = !input.checked; }
+  }));
+  pane.querySelectorAll('[data-fw-rule-del]').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm('Bu kural silinsin mi?')) return;
+    try { await adminApi(`/firewall/rules/${button.dataset.fwRuleDel}`, { method: 'DELETE' }); toast('Kural silindi'); fwRenderPane(); }
+    catch (error) { toast(error.message, 'error'); }
+  }));
+}
+
+// ── İzin listesi ───────────────────────────────────────────────────────────
+async function fwAllowlist(pane) {
+  const rows = await adminApi('/firewall/allowlist');
+  pane.innerHTML = `
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-user-check"></i> İzin listesi</h3>
+      <p class="fw-hint">Buradaki adresler hiçbir kurala takılmaz. Sonuna <code>*</code> koyarak önek yazabilirsiniz: <code>88.12.*</code></p>
+      <div class="fw-test-grid">
+        <input type="text" id="fw-allow-ip" placeholder="IP veya önek">
+        <input type="text" id="fw-allow-note" placeholder="Not (kim/neden)">
+        <button class="btn btn-sm btn-primary" id="fw-allow-add" type="button"><i class="fas fa-plus"></i> Ekle</button>
+      </div>
+    </div>
+    <div class="card">
+      ${rows.length ? rows.map(row => `
+        <div class="fw-rule">
+          <div><strong><code>${escHtml(row.ip)}</code></strong><small>${escHtml(row.note || '—')} · ${escHtml(row.created_by || '')} · ${escHtml(formatDate(row.created_at))}</small></div>
+          <button class="btn btn-sm btn-danger" data-fw-allow-del="${row.id}" type="button"><i class="fas fa-trash"></i></button>
+        </div>`).join('') : '<div style="padding:40px;text-align:center;color:var(--text3)">İzin listesi boş.</div>'}
+    </div>`;
+
+  $('#fw-allow-add').addEventListener('click', async () => {
+    const ip = $('#fw-allow-ip').value.trim();
+    if (!ip) return toast('IP girin', 'error');
+    try { await adminApi('/firewall/allowlist', { method: 'POST', body: JSON.stringify({ ip, note: $('#fw-allow-note').value.trim() }) }); toast('Eklendi'); fwRenderPane(); }
+    catch (error) { toast(error.message, 'error'); }
+  });
+  pane.querySelectorAll('[data-fw-allow-del]').forEach(button => button.addEventListener('click', async () => {
+    try { await adminApi(`/firewall/allowlist/${button.dataset.fwAllowDel}`, { method: 'DELETE' }); toast('Çıkarıldı'); fwRenderPane(); }
+    catch (error) { toast(error.message, 'error'); }
+  }));
+}
+
+// ── Ayarlar ────────────────────────────────────────────────────────────────
+async function fwSettings(pane) {
+  const config = firewallState.config;
+  const categories = firewallState.categories;
+  const number = (id, label, value, hint) => `
+    <label class="fw-field"><span>${escHtml(label)}</span>
+      <input type="number" id="${id}" value="${Number(value)}">
+      ${hint ? `<small>${escHtml(hint)}</small>` : ''}</label>`;
+  const toggle = (id, label, value, hint) => `
+    <label class="fw-switch"><input type="checkbox" id="${id}"${value ? ' checked' : ''}>
+      <span><strong>${escHtml(label)}</strong>${hint ? `<small>${escHtml(hint)}</small>` : ''}</span></label>`;
+
+  pane.innerHTML = `
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-toggle-on"></i> Çalışma modu</h3>
+      <div class="fw-modes">
+        ${[['off', 'Kapalı', 'Hiçbir şey yapılmaz, log tutulmaz.'],
+           ['monitor', 'İzleme', 'Yakalar ve loglar ama engellemez. Kural ayarlarken bunu kullanın.'],
+           ['block', 'Koruma', 'Yakalar, loglar, engeller ve eşiği aşanı yasaklar.']]
+          .map(([key, label, hint]) => `
+          <label class="fw-mode${config.mode === key ? ' is-active' : ''}">
+            <input type="radio" name="fw-mode" value="${key}"${config.mode === key ? ' checked' : ''}>
+            <strong>${label}</strong><small>${escHtml(hint)}</small></label>`).join('')}
+      </div>
+      ${toggle('fw-enabled', 'Güvenlik duvarı açık', config.enabled, 'Kapatılırsa mod ne olursa olsun çalışmaz.')}
+      <label class="fw-field"><span>Log ayrıntısı</span>
+        <select id="fw-log-level">
+          ${[['all', 'Her eşleşme'], ['suspicious', 'Sadece şüpheli ve üstü'], ['blocked', 'Sadece engellenen/yasaklanan']]
+            .map(([key, label]) => `<option value="${key}"${config.log_level === key ? ' selected' : ''}>${label}</option>`).join('')}
+        </select></label>
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-gauge-high"></i> Puanlama ve yasak</h3>
+      <div class="fw-grid">
+        ${number('fw-threshold', 'Yasak eşiği (puan)', config.score_threshold, 'Pencere içinde bu puana ulaşan IP yasaklanır.')}
+        ${number('fw-window', 'Puan penceresi (sn)', config.score_window_seconds, 'Puanlar bu süre sonunda sıfırlanır.')}
+        ${number('fw-ban-min', 'İlk yasak süresi (dk)', config.ban_minutes, '1440 = 24 saat')}
+        ${number('fw-ban-perm', 'Kaçıncı yasaktan sonra kalıcı', config.bans_before_permanent, '0 = asla kalıcı olmasın')}
+      </div>
+      ${toggle('fw-escalation', 'Tekrar edende süre katlansın', config.ban_escalation, 'Her yeni yasakta süre iki katına çıkar.')}
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-stopwatch"></i> Hız sınırı ve 404 fırtınası</h3>
+      ${toggle('fw-rate', 'Hız sınırı açık', config.rate_enabled)}
+      <div class="fw-grid">
+        ${number('fw-rate-win', 'Pencere (sn)', config.rate_window_seconds)}
+        ${number('fw-rate-max', 'Pencere başına istek', config.rate_max_requests)}
+        ${number('fw-rate-score', 'Aşımda puan', config.rate_score)}
+      </div>
+      ${toggle('fw-nf', '404 fırtınası yakalansın', config.notfound_enabled, 'Kısa sürede çok sayıda bulunamayan yol = tarayıcı.')}
+      <div class="fw-grid">
+        ${number('fw-nf-win', 'Pencere (sn)', config.notfound_window_seconds)}
+        ${number('fw-nf-max', 'İzin verilen 404', config.notfound_max)}
+        ${number('fw-nf-score', 'Aşımda puan', config.notfound_score)}
+      </div>
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-bug-slash"></i> Honeypot</h3>
+      ${toggle('fw-honeypot', 'Honeypot açık', config.honeypot_enabled, 'Bu yollara dokunan anında yasaklanır — meşru ziyaretçi buralara hiç gelmez.')}
+      <label class="fw-field"><span>Yollar (her satıra bir tane)</span>
+        <textarea id="fw-honeypot-paths" rows="5">${escHtml((config.honeypot_paths || []).join('\n'))}</textarea></label>
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-layer-group"></i> Saldırı türleri</h3>
+      <p class="fw-hint">Her tür ayrı açılır/kapanır, puanı ve sonucu değiştirilebilir. Yanlış pozitif gördüğünüz türü "Sadece logla"ya alın.</p>
+      <div class="fw-cat-table">
+        <div class="fw-cat-head"><span>Tür</span><span>Açık</span><span>Puan</span><span>Sonuç</span></div>
+        ${Object.entries(categories).map(([key, meta]) => `
+          <div class="fw-cat-row">
+            <span>${escHtml(meta.label)}</span>
+            <span><input type="checkbox" data-fw-cat-on="${key}"${meta.enabled !== false ? ' checked' : ''}></span>
+            <span><input type="number" data-fw-cat-score="${key}" value="${Number(meta.score)}"></span>
+            <span><select data-fw-cat-act="${key}">
+              ${['log', 'block', 'ban'].map(action => `<option value="${action}"${meta.action === action ? ' selected' : ''}>${escHtml(FIREWALL_ACTION_LABELS[action])}</option>`).join('')}
+            </select></span>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-sliders"></i> Kapsam ve performans</h3>
+      ${toggle('fw-skip-static', 'Statik dosyalar taranmasın', config.skip_static, 'Resim, CSS, JS gibi dosyalar atlanır — motor hızlı kalır.')}
+      ${toggle('fw-inspect-body', 'İstek gövdesi de taransın', config.inspect_body, 'DİKKAT: forum/mesaj içeriğinde kod yazan kullanıcılar yanlışlıkla yakalanabilir. Önce izleme modunda deneyin.')}
+      <label class="fw-field"><span>Muaf yollar (her satıra bir önek)</span>
+        <textarea id="fw-skip-paths" rows="3" placeholder="/arama">${escHtml((config.skip_paths || []).join('\n'))}</textarea>
+        <small>Yönetim paneli zaten her zaman muaftır.</small></label>
+      <div class="fw-grid">
+        ${number('fw-retention', 'Log saklama (gün)', config.log_retention_days, '0 = sınırsız')}
+        ${number('fw-maxrows', 'En fazla log satırı', config.log_max_rows)}
+      </div>
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-earth-americas"></i> Ülke filtresi</h3>
+      <p class="fw-hint">Cloudflare arkasında çalışır (cf-ipcountry başlığı). Kodları iki harfli yazın: TR, DE, US…</p>
+      <label class="fw-field"><span>Mod</span>
+        <select id="fw-country-mode">
+          ${[['off', 'Kapalı'], ['allow', 'Sadece listedekiler girebilsin'], ['block', 'Listedekiler engellensin']]
+            .map(([key, label]) => `<option value="${key}"${config.country_mode === key ? ' selected' : ''}>${label}</option>`).join('')}
+        </select></label>
+      <label class="fw-field"><span>Ülke kodları (virgülle)</span>
+        <input type="text" id="fw-country-list" value="${escHtml((config.country_list || []).join(', '))}"></label>
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-reply"></i> Engellenen isteğe verilecek yanıt</h3>
+      <div class="fw-grid">
+        <label class="fw-field"><span>HTTP kodu</span>
+          <select id="fw-block-status">${[403, 404, 429, 444].map(code => `<option value="${code}"${Number(config.block_status) === code ? ' selected' : ''}>${code}</option>`).join('')}</select>
+          <small>404 seçerseniz saldırgan sitenin varlığını bile anlamaz.</small></label>
+        <label class="fw-field"><span>Mesaj</span><input type="text" id="fw-block-message" value="${escHtml(config.block_message)}"></label>
+      </div>
+    </div>
+
+    <div class="fw-save-bar">
+      <button class="btn btn-primary" id="fw-save" type="button"><i class="fas fa-floppy-disk"></i> Ayarları kaydet</button>
+      <button class="btn btn-danger" id="fw-purge" type="button"><i class="fas fa-trash"></i> Tüm logları sil</button>
+      <button class="btn" id="fw-release" type="button"><i class="fas fa-unlock"></i> Tüm yasakları kaldır</button>
+    </div>`;
+
+  pane.querySelectorAll('.fw-mode input').forEach(radio => radio.addEventListener('change', () => {
+    pane.querySelectorAll('.fw-mode').forEach(mode => mode.classList.toggle('is-active', mode.querySelector('input').checked));
+  }));
+
+  $('#fw-save').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const categoryPayload = {};
+    pane.querySelectorAll('[data-fw-cat-on]').forEach(input => {
+      const key = input.dataset.fwCatOn;
+      categoryPayload[key] = {
+        enabled: input.checked,
+        score: Number(pane.querySelector(`[data-fw-cat-score="${key}"]`).value) || 0,
+        action: pane.querySelector(`[data-fw-cat-act="${key}"]`).value
+      };
+    });
+    const lines = value => value.split('\n').map(line => line.trim()).filter(Boolean);
+    const payload = {
+      enabled: $('#fw-enabled').checked,
+      mode: pane.querySelector('input[name="fw-mode"]:checked')?.value || 'block',
+      log_level: $('#fw-log-level').value,
+      score_threshold: Number($('#fw-threshold').value),
+      score_window_seconds: Number($('#fw-window').value),
+      ban_minutes: Number($('#fw-ban-min').value),
+      bans_before_permanent: Number($('#fw-ban-perm').value),
+      ban_escalation: $('#fw-escalation').checked,
+      rate_enabled: $('#fw-rate').checked,
+      rate_window_seconds: Number($('#fw-rate-win').value),
+      rate_max_requests: Number($('#fw-rate-max').value),
+      rate_score: Number($('#fw-rate-score').value),
+      notfound_enabled: $('#fw-nf').checked,
+      notfound_window_seconds: Number($('#fw-nf-win').value),
+      notfound_max: Number($('#fw-nf-max').value),
+      notfound_score: Number($('#fw-nf-score').value),
+      honeypot_enabled: $('#fw-honeypot').checked,
+      honeypot_paths: lines($('#fw-honeypot-paths').value),
+      skip_static: $('#fw-skip-static').checked,
+      inspect_body: $('#fw-inspect-body').checked,
+      skip_paths: lines($('#fw-skip-paths').value),
+      log_retention_days: Number($('#fw-retention').value),
+      log_max_rows: Number($('#fw-maxrows').value),
+      country_mode: $('#fw-country-mode').value,
+      country_list: $('#fw-country-list').value.split(',').map(code => code.trim().toUpperCase()).filter(Boolean),
+      block_status: Number($('#fw-block-status').value),
+      block_message: $('#fw-block-message').value,
+      categories: categoryPayload
+    };
+    button.disabled = true;
+    try {
+      const result = await adminApi('/firewall/config', { method: 'PUT', body: JSON.stringify(payload) });
+      firewallState.config = result.config;
+      toast('Güvenlik duvarı ayarları kaydedildi');
+    } catch (error) { toast(error.message, 'error'); }
+    button.disabled = false;
+  });
+
+  $('#fw-purge').addEventListener('click', async () => {
+    if (!confirm('Tüm güvenlik logları silinsin mi? Bu geri alınamaz.')) return;
+    try { await adminApi('/firewall/purge', { method: 'POST', body: JSON.stringify({ scope: 'events' }) }); toast('Loglar silindi'); }
+    catch (error) { toast(error.message, 'error'); }
+  });
+  $('#fw-release').addEventListener('click', async () => {
+    if (!confirm('Tüm aktif yasaklar kaldırılsın mı?')) return;
+    try { await adminApi('/firewall/purge', { method: 'POST', body: JSON.stringify({ scope: 'bans' }) }); toast('Yasaklar kaldırıldı'); }
+    catch (error) { toast(error.message, 'error'); }
+  });
 }
 
 async function renderAuthorityLogs(main) {

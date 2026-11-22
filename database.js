@@ -2148,6 +2148,80 @@ Talepleriniz için platform üzerinden iletişime geçebilirsiniz.`]);
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS lock_mode_user2 TEXT DEFAULT '';
   `);
 
+  // ───────────────────────────────────────────────────────────────────────
+  // GÜVENLİK DUVARI — olaylar, yasaklar, özel kurallar, izin listesi
+  // ───────────────────────────────────────────────────────────────────────
+  await query(`
+    CREATE TABLE IF NOT EXISTS firewall_events (
+      id BIGSERIAL PRIMARY KEY,
+      ip TEXT NOT NULL,
+      method TEXT DEFAULT '',
+      path TEXT DEFAULT '',
+      query_string TEXT DEFAULT '',
+      host TEXT DEFAULT '',
+      referer TEXT DEFAULT '',
+      user_agent TEXT DEFAULT '',
+      rule_id TEXT DEFAULT '',
+      rule_label TEXT DEFAULT '',
+      category TEXT DEFAULT '',
+      severity INTEGER DEFAULT 1,
+      score INTEGER DEFAULT 0,
+      action TEXT DEFAULT 'log',
+      matched TEXT DEFAULT '',
+      country TEXT DEFAULT '',
+      city TEXT DEFAULT '',
+      device TEXT DEFAULT '',
+      operating_system TEXT DEFAULT '',
+      actor TEXT DEFAULT 'anonymous',
+      detail TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_firewall_events_created ON firewall_events(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_firewall_events_ip ON firewall_events(ip);
+    CREATE INDEX IF NOT EXISTS idx_firewall_events_category ON firewall_events(category);
+    CREATE INDEX IF NOT EXISTS idx_firewall_events_action ON firewall_events(action);
+
+    CREATE TABLE IF NOT EXISTS firewall_bans (
+      id SERIAL PRIMARY KEY,
+      ip TEXT NOT NULL,
+      reason TEXT DEFAULT '',
+      category TEXT DEFAULT '',
+      score INTEGER DEFAULT 0,
+      permanent BOOLEAN DEFAULT FALSE,
+      expires_at TIMESTAMPTZ,
+      created_by TEXT DEFAULT 'auto',
+      hit_count INTEGER DEFAULT 1,
+      active BOOLEAN DEFAULT TRUE,
+      note TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      released_at TIMESTAMPTZ
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_firewall_bans_active_ip ON firewall_bans(ip) WHERE active;
+    CREATE INDEX IF NOT EXISTS idx_firewall_bans_created ON firewall_bans(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS firewall_rules (
+      id SERIAL PRIMARY KEY,
+      label TEXT NOT NULL,
+      category TEXT DEFAULT 'custom',
+      target TEXT DEFAULT 'any',
+      pattern TEXT NOT NULL,
+      flags TEXT DEFAULT 'i',
+      score INTEGER,
+      action TEXT,
+      enabled BOOLEAN DEFAULT TRUE,
+      created_by TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS firewall_allowlist (
+      id SERIAL PRIMARY KEY,
+      ip TEXT NOT NULL UNIQUE,
+      note TEXT DEFAULT '',
+      created_by TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
   console.log('PostgreSQL bağlantısı ve tablolar hazır.');
 }
 

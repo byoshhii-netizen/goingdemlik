@@ -20,6 +20,7 @@ const { Server } = require('socket.io');
 const webpush = require('web-push');
 const { query: databaseQuery, pool, initDb } = require('./database');
 const { hashPassword, verifyPassword, needsRehash } = require('./password');
+const { createFirewall } = require('./firewall');
 
 const webPushPublicKey = String(process.env.WEB_PUSH_PUBLIC_KEY || '').trim();
 const webPushPrivateKey = String(process.env.WEB_PUSH_PRIVATE_KEY || '').trim();
@@ -411,6 +412,23 @@ if (!USE_CLOUDINARY) {
 
 // Cloudflare proxy arkasındaysa gerçek IP'yi al
 app.set('trust proxy', 1);
+
+// ===== GÜVENLİK DUVARI =====
+// Zincirin en başında durur: yasaklı bir IP veya bilinen bir saldırı imzası
+// uygulamanın geri kalanına hiç ulaşmaz. Ayarlar admin panelinden yönetilir.
+const firewall = createFirewall({
+  query,
+  getIp: req => getIp(req),
+  getClientInfo: req => getClientInfo(req),
+  // Yönetim paneli duvarın dışındadır; aksi halde yöneticinin kendi IP'si
+  // yasaklanırsa paneli açıp yasağı kaldıramaz. Bu yollar admin oturumu ister.
+  isExempt: req => req.path.startsWith('/api/admin')
+    || req.path.startsWith('/api/vmb-admin')
+    || isAdminPanelRequestPath(req.path)
+    || req.path === '/vmb-panel'
+    || req.path === '/vmb-panel.html'
+});
+app.use((req, res, next) => firewall.middleware(req, res, next));
 
 // ===== GÜVENLİK BAŞLIKLARI =====
 app.use((req, res, next) => {
@@ -1563,7 +1581,7 @@ async function adminMiddleware(req, res, next) {
   const permissions = user;
   if (req.method === 'GET') {
     const readRules = [
-      [/\/(route-logs|authority-logs)/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
+      [/\/(route-logs|authority-logs)/, false], [/\/firewall/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
       [/\/notifications/, hasAdminPermission(permissions, 'can_manage_announcements')],
       [/\/badges/, hasAdminPermission(permissions, 'can_assign_badges')],
       [/\/artists(?:\/|$)/, hasAdminPermission(permissions, 'can_review_artists')],
@@ -9617,6 +9635,346 @@ app.get('/api/admin/route-logs', adminMiddleware, async (req, res) => {
   res.json(rows);
 });
 
+// =========================================================================
+// GÜVENLİK DUVARI — ADMIN API
+// =========================================================================
+function firewallActor(req) {
+  return req.adminUser?.username || req.adminUser?.name || 'admin';
+}
+
+// Ayarlar + kategori tanımları + canlı sayaçlar tek seferde
+app.get('/api/admin/firewall/config', adminMiddleware, async (req, res) => {
+  res.json({
+    config: firewall.config,
+    categories: firewall.CATEGORIES,
+    defaults: firewall.DEFAULT_CONFIG,
+    stats: firewall.stats,
+    builtin_rule_count: firewall.BUILTIN_RULES.length
+  });
+});
+
+app.put('/api/admin/firewall/config', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Güvenlik duvarı ayarları yalnızca ana admine açıktır.' });
+  const body = req.body || {};
+  const asInt = (value, fallback, min, max) => {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
+  };
+  const current = firewall.config;
+  const categories = {};
+  for (const [key, meta] of Object.entries(firewall.CATEGORIES)) {
+    const incoming = body.categories?.[key] || {};
+    categories[key] = {
+      enabled: incoming.enabled !== false,
+      score: asInt(incoming.score, meta.score, 0, 1000),
+      action: ['log', 'block', 'ban'].includes(incoming.action) ? incoming.action : (meta.action || 'block')
+    };
+  }
+  const cleanList = (value, limit, max) => (Array.isArray(value) ? value : [])
+    .map(entry => String(entry || '').trim().slice(0, limit))
+    .filter(Boolean)
+    .slice(0, max);
+
+  const next = {
+    enabled: body.enabled !== false,
+    mode: ['off', 'monitor', 'block'].includes(body.mode) ? body.mode : current.mode,
+    log_level: ['all', 'suspicious', 'blocked'].includes(body.log_level) ? body.log_level : current.log_level,
+    score_threshold: asInt(body.score_threshold, current.score_threshold, 1, 10000),
+    score_window_seconds: asInt(body.score_window_seconds, current.score_window_seconds, 10, 86400),
+    ban_minutes: asInt(body.ban_minutes, current.ban_minutes, 1, 525600),
+    ban_escalation: body.ban_escalation !== false,
+    bans_before_permanent: asInt(body.bans_before_permanent, current.bans_before_permanent, 0, 100),
+    rate_enabled: body.rate_enabled !== false,
+    rate_window_seconds: asInt(body.rate_window_seconds, current.rate_window_seconds, 1, 3600),
+    rate_max_requests: asInt(body.rate_max_requests, current.rate_max_requests, 5, 100000),
+    rate_score: asInt(body.rate_score, current.rate_score, 0, 1000),
+    notfound_enabled: body.notfound_enabled !== false,
+    notfound_window_seconds: asInt(body.notfound_window_seconds, current.notfound_window_seconds, 5, 3600),
+    notfound_max: asInt(body.notfound_max, current.notfound_max, 3, 10000),
+    notfound_score: asInt(body.notfound_score, current.notfound_score, 0, 1000),
+    honeypot_enabled: body.honeypot_enabled !== false,
+    honeypot_paths: cleanList(body.honeypot_paths, 200, 100),
+    country_mode: ['off', 'allow', 'block'].includes(body.country_mode) ? body.country_mode : 'off',
+    country_list: cleanList(body.country_list, 4, 250).map(entry => entry.toUpperCase()),
+    skip_static: body.skip_static !== false,
+    skip_paths: cleanList(body.skip_paths, 200, 100),
+    inspect_body: body.inspect_body === true,
+    body_scan_limit: asInt(body.body_scan_limit, current.body_scan_limit, 256, 65536),
+    log_retention_days: asInt(body.log_retention_days, current.log_retention_days, 0, 3650),
+    log_max_rows: asInt(body.log_max_rows, current.log_max_rows, 0, 5000000),
+    block_status: [403, 404, 429, 444].includes(Number(body.block_status)) ? Number(body.block_status) : current.block_status,
+    block_message: String(body.block_message || current.block_message).slice(0, 300),
+    categories
+  };
+
+  try {
+    await query(
+      "INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
+      ['firewall_config', JSON.stringify(next)]
+    );
+    await firewall.reload();
+    await logAction(firewallActor(req), 'firewall_config_update', next.mode, JSON.stringify({ enabled: next.enabled, mode: next.mode }), getIp(req), getClientInfo(req));
+    res.json({ ok: true, config: firewall.config });
+  } catch (error) {
+    console.error('[firewall] Ayar kaydedilemedi:', error.message);
+    res.status(500).json({ error: 'Güvenlik duvarı ayarları kaydedilemedi.' });
+  }
+});
+
+// Olay akışı — filtrelenebilir
+app.get('/api/admin/firewall/events', adminMiddleware, async (req, res) => {
+  const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 200, 1), 1000);
+  const filters = [];
+  const values = [];
+  const push = (clause, value) => { values.push(value); filters.push(clause.replace('?', `$${values.length}`)); };
+  if (req.query.category) push('category = ?', String(req.query.category).slice(0, 48));
+  if (req.query.action) push('action = ?', String(req.query.action).slice(0, 16));
+  if (req.query.ip) push('ip = ?', String(req.query.ip).slice(0, 64));
+  if (req.query.severity) push('severity >= ?', Math.max(1, Number.parseInt(req.query.severity, 10) || 1));
+  if (req.query.since) push("created_at >= NOW() - (? || ' hours')::interval", String(Math.max(1, Number.parseInt(req.query.since, 10) || 24)));
+  if (req.query.q) {
+    const term = `%${String(req.query.q).slice(0, 120)}%`;
+    values.push(term);
+    filters.push(`(path ILIKE $${values.length} OR ip ILIKE $${values.length} OR rule_label ILIKE $${values.length} OR user_agent ILIKE $${values.length} OR matched ILIKE $${values.length})`);
+  }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  values.push(limit);
+  try {
+    const { rows } = await query(`SELECT * FROM firewall_events ${where} ORDER BY id DESC LIMIT $${values.length}`, values);
+    res.json(rows);
+  } catch (error) {
+    console.error('[firewall] Olaylar okunamadı:', error.message);
+    res.status(500).json({ error: 'Güvenlik olayları okunamadı.' });
+  }
+});
+
+// Özet: son 24 saat / 7 gün sayıları, kategori dağılımı, en çok deneyen IP'ler
+app.get('/api/admin/firewall/stats', adminMiddleware, async (req, res) => {
+  try {
+    const [totals, byCategory, byAction, topIps, timeline, bans] = await Promise.all([
+      query(`SELECT
+               COUNT(*)::int AS total,
+               COUNT(*) FILTER (WHERE created_at > NOW() - interval '24 hours')::int AS last_24h,
+               COUNT(*) FILTER (WHERE created_at > NOW() - interval '1 hour')::int AS last_hour,
+               COUNT(*) FILTER (WHERE action IN ('blocked','banned'))::int AS blocked,
+               COUNT(DISTINCT ip)::int AS unique_ips
+             FROM firewall_events`),
+      query(`SELECT category, COUNT(*)::int AS total FROM firewall_events
+             WHERE created_at > NOW() - interval '7 days' GROUP BY category ORDER BY total DESC LIMIT 20`),
+      query(`SELECT action, COUNT(*)::int AS total FROM firewall_events
+             WHERE created_at > NOW() - interval '7 days' GROUP BY action ORDER BY total DESC`),
+      query(`SELECT ip, COUNT(*)::int AS total, MAX(created_at) AS last_seen,
+                    (ARRAY_AGG(DISTINCT category))[1:4] AS categories,
+                    (ARRAY_AGG(country ORDER BY created_at DESC))[1] AS country
+             FROM firewall_events WHERE created_at > NOW() - interval '7 days'
+             GROUP BY ip ORDER BY total DESC LIMIT 25`),
+      query(`SELECT to_char(date_trunc('hour', created_at), 'YYYY-MM-DD HH24:00') AS hour, COUNT(*)::int AS total
+             FROM firewall_events WHERE created_at > NOW() - interval '24 hours'
+             GROUP BY 1 ORDER BY 1`),
+      query(`SELECT COUNT(*) FILTER (WHERE active)::int AS active,
+                    COUNT(*) FILTER (WHERE active AND permanent)::int AS permanent,
+                    COUNT(*)::int AS total FROM firewall_bans`)
+    ]);
+    res.json({
+      totals: totals.rows[0] || {},
+      by_category: byCategory.rows,
+      by_action: byAction.rows,
+      top_ips: topIps.rows,
+      timeline: timeline.rows,
+      bans: bans.rows[0] || {},
+      runtime: firewall.stats
+    });
+  } catch (error) {
+    console.error('[firewall] Özet okunamadı:', error.message);
+    res.status(500).json({ error: 'Güvenlik özeti okunamadı.' });
+  }
+});
+
+// Yasaklılar
+app.get('/api/admin/firewall/bans', adminMiddleware, async (req, res) => {
+  const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 300, 1), 1000);
+  const onlyActive = req.query.all !== '1';
+  try {
+    const { rows } = await query(
+      `SELECT * FROM firewall_bans ${onlyActive ? 'WHERE active=TRUE' : ''} ORDER BY created_at DESC LIMIT $1`,
+      [limit]
+    );
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Yasak listesi okunamadı.' });
+  }
+});
+
+app.post('/api/admin/firewall/bans', adminMiddleware, async (req, res) => {
+  const ip = firewall.normalizeIp(req.body?.ip);
+  if (!ip) return res.status(400).json({ error: 'IP adresi gerekli.' });
+  if (firewall.isAllowed(ip)) return res.status(400).json({ error: 'Bu IP izin listesinde; önce oradan çıkarın.' });
+  const minutes = Number.parseInt(req.body?.minutes, 10);
+  const ban = await firewall.banIp(ip, {
+    reason: String(req.body?.reason || 'Yetkili tarafından eklendi').slice(0, 300),
+    category: 'custom',
+    createdBy: firewallActor(req),
+    permanent: req.body?.permanent === true,
+    minutes: Number.isFinite(minutes) && minutes > 0 ? minutes : undefined
+  });
+  if (!ban) return res.status(500).json({ error: 'Yasak eklenemedi.' });
+  await logAction(firewallActor(req), 'firewall_ban', ip, String(req.body?.reason || ''), getIp(req), getClientInfo(req));
+  res.json({ ok: true, ban });
+});
+
+app.delete('/api/admin/firewall/bans/:id', adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT ip FROM firewall_bans WHERE id=$1', [Number.parseInt(req.params.id, 10) || 0]);
+    if (!rows.length) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
+    await firewall.unbanIp(rows[0].ip);
+    await logAction(firewallActor(req), 'firewall_unban', rows[0].ip, '', getIp(req), getClientInfo(req));
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Yasak kaldırılamadı.' });
+  }
+});
+
+// Özel kurallar
+app.get('/api/admin/firewall/rules', adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT * FROM firewall_rules ORDER BY id DESC');
+    res.json({
+      custom: rows,
+      builtin: firewall.BUILTIN_RULES.map(([id, category, target, pattern, label]) => ({
+        id, category, target, label, pattern: String(pattern)
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Kurallar okunamadı.' });
+  }
+});
+
+app.post('/api/admin/firewall/rules', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Kural eklemek yalnızca ana admine açıktır.' });
+  const label = String(req.body?.label || '').trim().slice(0, 190);
+  const pattern = String(req.body?.pattern || '').trim().slice(0, 2000);
+  if (!label || !pattern) return res.status(400).json({ error: 'Kural adı ve deseni gerekli.' });
+  // Desen gerçekten derleniyor mu ve katastrofik geri izleme riski var mı?
+  try { new RegExp(pattern, 'i'); } catch { return res.status(400).json({ error: 'Düzenli ifade geçersiz.' }); }
+  if (/(\(\?:?[^)]*[+*]\)[+*])|(\([^)]*[+*][^)]*\)[+*])/.test(pattern)) {
+    return res.status(400).json({ error: 'Bu desen iç içe tekrar içeriyor ve sunucuyu kilitleyebilir. Daha basit bir desen yazın.' });
+  }
+  const category = firewall.CATEGORIES[req.body?.category] ? req.body.category : 'custom';
+  const target = ['path', 'query', 'body', 'ua', 'referer', 'any'].includes(req.body?.target) ? req.body.target : 'any';
+  const score = Number.parseInt(req.body?.score, 10);
+  const action = ['log', 'block', 'ban'].includes(req.body?.action) ? req.body.action : null;
+  try {
+    const { rows } = await query(
+      `INSERT INTO firewall_rules (label, category, target, pattern, flags, score, action, enabled, created_by)
+       VALUES ($1,$2,$3,$4,'i',$5,$6,TRUE,$7) RETURNING *`,
+      [label, category, target, pattern, Number.isFinite(score) && score > 0 ? score : null, action, firewallActor(req)]
+    );
+    await firewall.reload();
+    await logAction(firewallActor(req), 'firewall_rule_create', label, pattern.slice(0, 200), getIp(req), getClientInfo(req));
+    res.json({ ok: true, rule: rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: 'Kural eklenemedi.' });
+  }
+});
+
+app.patch('/api/admin/firewall/rules/:id', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Kural düzenlemek yalnızca ana admine açıktır.' });
+  const id = Number.parseInt(req.params.id, 10) || 0;
+  try {
+    await query('UPDATE firewall_rules SET enabled=$1 WHERE id=$2', [req.body?.enabled !== false, id]);
+    await firewall.reload();
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Kural güncellenemedi.' });
+  }
+});
+
+app.delete('/api/admin/firewall/rules/:id', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Kural silmek yalnızca ana admine açıktır.' });
+  try {
+    await query('DELETE FROM firewall_rules WHERE id=$1', [Number.parseInt(req.params.id, 10) || 0]);
+    await firewall.reload();
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Kural silinemedi.' });
+  }
+});
+
+// İzin listesi
+app.get('/api/admin/firewall/allowlist', adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT * FROM firewall_allowlist ORDER BY created_at DESC');
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: 'İzin listesi okunamadı.' });
+  }
+});
+
+app.post('/api/admin/firewall/allowlist', adminMiddleware, async (req, res) => {
+  const ip = String(req.body?.ip || '').trim().slice(0, 64);
+  if (!ip) return res.status(400).json({ error: 'IP adresi gerekli.' });
+  try {
+    await query(
+      `INSERT INTO firewall_allowlist (ip, note, created_by) VALUES ($1,$2,$3)
+       ON CONFLICT (ip) DO UPDATE SET note=EXCLUDED.note`,
+      [ip, String(req.body?.note || '').slice(0, 200), firewallActor(req)]
+    );
+    await query('UPDATE firewall_bans SET active=FALSE, released_at=NOW() WHERE ip=$1 AND active=TRUE', [ip]);
+    await firewall.refreshAllowlist();
+    await firewall.refreshBans();
+    await logAction(firewallActor(req), 'firewall_allowlist_add', ip, '', getIp(req), getClientInfo(req));
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'İzin listesine eklenemedi.' });
+  }
+});
+
+app.delete('/api/admin/firewall/allowlist/:id', adminMiddleware, async (req, res) => {
+  try {
+    await query('DELETE FROM firewall_allowlist WHERE id=$1', [Number.parseInt(req.params.id, 10) || 0]);
+    await firewall.refreshAllowlist();
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'İzin listesinden çıkarılamadı.' });
+  }
+});
+
+// Kural testi — gerçek motorla aynı yolu kullanır, hiçbir şeyi engellemez.
+app.post('/api/admin/firewall/test', adminMiddleware, async (req, res) => {
+  const sample = {
+    method: String(req.body?.method || 'GET').toUpperCase().slice(0, 10),
+    path: String(req.body?.path || '/').slice(0, 512),
+    queryString: String(req.body?.query || '').slice(0, 512),
+    body: String(req.body?.body || '').slice(0, 8192),
+    userAgent: String(req.body?.user_agent || '').slice(0, 512),
+    referer: String(req.body?.referer || '').slice(0, 512)
+  };
+  const hits = firewall.evaluate(sample);
+  const total = hits.reduce((sum, hit) => sum + (hit.score || 0), 0);
+  res.json({
+    sample,
+    hits,
+    total_score: total,
+    threshold: firewall.config.score_threshold,
+    would_ban: total >= firewall.config.score_threshold || hits.some(hit => hit.action === 'ban'),
+    would_block: hits.some(hit => hit.action === 'block' || hit.action === 'ban')
+  });
+});
+
+app.post('/api/admin/firewall/purge', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Log temizlemek yalnızca ana admine açıktır.' });
+  try {
+    if (req.body?.scope === 'bans') await query('UPDATE firewall_bans SET active=FALSE, released_at=NOW() WHERE active=TRUE');
+    else await query('DELETE FROM firewall_events');
+    await firewall.refreshBans();
+    await logAction(firewallActor(req), 'firewall_purge', String(req.body?.scope || 'events'), '', getIp(req), getClientInfo(req));
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Temizlenemedi.' });
+  }
+});
+
 app.get('/api/admin/authority-logs', adminMiddleware, async (req, res) => {
   if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Bu loglar yalnızca ana admin içindir' });
   const limit = Math.min(parseInt(req.query.limit) || 500, 1000);
@@ -16384,6 +16742,7 @@ app.get('*', (req, res) => {
 });
 
 initDb().then(() => {
+  firewall.start().catch(error => console.error('[firewall] Başlatılamadı:', error.message));
   const pushDeliveryTimer = setInterval(processPushDeliveryQueue, 2000);
   pushDeliveryTimer.unref();
   sendAccountEmailReminders();
