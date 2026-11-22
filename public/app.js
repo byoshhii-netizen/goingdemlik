@@ -11,6 +11,111 @@ let dmChatRenderGeneration = 0;
 let dmMessagesRenderGeneration = 0;
 let dmMessageResizeObserver = null;
 let dmMessageMutationObserver = null;
+// ── DM shell reuse + prefetch (mesajlar <-> sohbet gecisini aninda yapar) ──
+let dmShellOwner = null;          // shell'i kuran kullanici id'si; shell DOM'dan silinince sifirlanir
+let dmInboxRefresh = null;        // aktif shell'in listeyi tazeleyen fonksiyonu
+let dmInboxRefreshAt = 0;
+const dmConversationPrefetch = new Map(); // username -> { at, headersKey, promise }
+const DM_PREFETCH_TTL = 10000;
+
+// Liste ile sohbetin yan yana durdugu genis ekranlarda secili satir vurgusu anlamli.
+function dmPrefersPointerSelection() {
+  try {
+    return window.matchMedia('(min-width: 900px) and (hover: hover) and (pointer: fine)').matches;
+  } catch { return false; }
+}
+
+function dmUnlockHeadersFor(username) {
+  const headers = {};
+  if (dmSearchUnlockCode) headers['X-DM-Search-Code'] = dmSearchUnlockCode;
+  if (dmIconUnlockCode) headers['X-DM-Conversation-Code'] = dmIconUnlockCode;
+  const temporaryUnlock = dmTemporaryUnlocks.get(String(username).toLocaleLowerCase('tr-TR'));
+  if (temporaryUnlock?.password) headers['X-DM-Conversation-Password'] = temporaryUnlock.password;
+  if (temporaryUnlock?.accountCode) headers['X-DM-Conversation-Code'] = temporaryUnlock.accountCode;
+  return headers;
+}
+
+// Kullanici listedeki sohbete dokundugu anda istegi baslatir; navigate ile paralel ilerler.
+function prefetchDmConversation(username) {
+  if (!username || !currentUser) return;
+  const key = String(username).toLocaleLowerCase('tr-TR');
+  const existing = dmConversationPrefetch.get(key);
+  if (existing && Date.now() - existing.at < DM_PREFETCH_TTL) return;
+  const headers = dmUnlockHeadersFor(username);
+  const promise = api(`/conversation/${encodeURIComponent(username)}`, { headers })
+    .then(data => ({ ok: true, data }))
+    .catch(error => ({ ok: false, error }));
+  dmConversationPrefetch.set(key, { at: Date.now(), headersKey: JSON.stringify(headers), promise });
+  if (dmConversationPrefetch.size > 12) {
+    const oldest = [...dmConversationPrefetch.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+    if (oldest) dmConversationPrefetch.delete(oldest[0]);
+  }
+}
+
+function takeDmConversationPrefetch(username, headers) {
+  const key = String(username).toLocaleLowerCase('tr-TR');
+  const entry = dmConversationPrefetch.get(key);
+  if (!entry) return null;
+  dmConversationPrefetch.delete(key);
+  if (Date.now() - entry.at > DM_PREFETCH_TTL) return null;
+  if (entry.headersKey !== JSON.stringify(headers || {})) return null;
+  return entry.promise;
+}
+
+function clearDmConversationPrefetch(username) {
+  if (username) dmConversationPrefetch.delete(String(username).toLocaleLowerCase('tr-TR'));
+  else dmConversationPrefetch.clear();
+}
+
+// Sohbetten cikarken calisan temizlik; hem renderDMChat hem de listeye donus kullanir.
+function teardownDmChatState() {
+  dmChatRenderGeneration++;
+  dmMessageResizeObserver?.disconnect();
+  dmMessageMutationObserver?.disconnect();
+  dmMessageResizeObserver = null;
+  dmMessageMutationObserver = null;
+  try { window.__dmSharedSongAudio?.pause(); } catch {}
+  window.__dmSharedSongAudio = null;
+  window.__dmSharedSongButton = null;
+  try { exitDmSelection(); } catch {}
+  if (dmPollTimer) { clearInterval(dmPollTimer); dmPollTimer = null; }
+  try { stopLocalDmTyping(); } catch {}
+  if (dmPeerTypingTimer) { clearTimeout(dmPeerTypingTimer); dmPeerTypingTimer = null; }
+}
+
+// ── Hikaye "goruldu" izi: halka sunucu cevabini beklemeden soluklasir ──
+const STORY_SEEN_KEY = 'cig_story_seen_v1';
+let storySeenSet = null;
+function storySeenStore() {
+  if (storySeenSet) return storySeenSet;
+  storySeenSet = new Set();
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORY_SEEN_KEY) || '[]');
+    if (Array.isArray(raw)) raw.forEach(id => storySeenSet.add(String(id)));
+  } catch { /* bozuk kayit yok sayilir */ }
+  return storySeenSet;
+}
+function markStorySeenLocally(story) {
+  if (!story) return;
+  const store = storySeenStore();
+  [story.public_id, story.id, story].forEach(value => {
+    if (value === null || value === undefined || typeof value === 'object') return;
+    store.add(String(value));
+  });
+  try {
+    const trimmed = [...store].slice(-600);
+    storySeenSet = new Set(trimmed);
+    localStorage.setItem(STORY_SEEN_KEY, JSON.stringify(trimmed));
+  } catch { /* kota dolu olabilir */ }
+}
+function storySeenLocally(story) {
+  if (!story) return false;
+  const store = storySeenStore();
+  return store.has(String(story.public_id || '')) || store.has(String(story.id || ''));
+}
+function storyLooksViewed(story) {
+  return story?.viewed === true || story?.viewed === 1 || story?.viewed === 'true' || storySeenLocally(story);
+}
 const seenDmIncomingNotifications = new Map();
 let mobileSwipeStart = null;
 let lastMobileSwipeAt = 0;
@@ -2067,6 +2172,12 @@ function renderRoute(fullPath) {
   if (!isInMessages && (dmSearchUnlockCode || dmSearchUnlockedConvs.length)) {
     dmSearchUnlockCode = '';
     dmSearchUnlockedConvs = [];
+  }
+  if (wasInMessages && !isInMessages) {
+    // Mesajlardan tamamen çıkıldı: kabuk ve ön yükleme izleri sıfırlanır.
+    dmShellOwner = null;
+    dmInboxRefresh = null;
+    clearDmConversationPrefetch();
   }
   if (wasInMessages && path.startsWith('/profil/')) dmSuggestionsReturningFromProfile = true;
   const returnedFromProfile = isInMessages && previousPath?.startsWith('/profil/') && dmSuggestionsReturningFromProfile;
@@ -15630,6 +15741,36 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
   if (!currentUser) { navigate('/giris'); return; }
   document.title = 'Mesajlar - ' + siteName;
 
+  // ── Hızlı yol ──────────────────────────────────────────────────────────────
+  // Mesajlar kabuğu zaten ekrandaysa (liste <-> sohbet geçişi) kenar çubuğunu
+  // baştan kurmak yerine olduğu gibi bırakırız: 7 API isteği ve tüm liste
+  // DOM'unun yeniden üretilmesi atlanır, geçiş anında gerçekleşir.
+  const existingLayout = app?.querySelector?.('.dm-layout');
+  if (existingLayout && dmShellOwner === String(currentUser.id) && !rotateSuggestions) {
+    existingLayout.classList.toggle('dm-mobile-chat-open', !!targetUsername);
+    document.querySelectorAll('.dm-conv-item.active').forEach(el => el.classList.remove('active'));
+    if (targetUsername) {
+      if (dmPrefersPointerSelection()) {
+        document.querySelector(`.dm-conv-item[data-username="${CSS.escape(targetUsername)}"]`)?.classList.add('active');
+      }
+      await renderDMChat(targetUsername);
+    } else {
+      teardownDmChatState();
+      const mainEl = document.getElementById('dm-main');
+      if (mainEl) {
+        mainEl.innerHTML = `<div class="dm-empty"><i class="fas fa-comments" style="font-size:44px;opacity:0.25"></i><p style="color:var(--text-muted);margin-top:8px">Bir konuşma seçin</p></div>`;
+      }
+    }
+    // Liste verisini arka planda tazele; ekranı bekletmez.
+    if (dmInboxRefresh && Date.now() - dmInboxRefreshAt > 4000) {
+      dmInboxRefreshAt = Date.now();
+      Promise.resolve().then(dmInboxRefresh).catch(() => {});
+    }
+    return;
+  }
+  dmShellOwner = null;
+  dmInboxRefresh = null;
+
   let convs = [], hiddenConvs = [], groups = [], suggestedPeople = [];
   let suggestedPeopleError = '';
   const suggestionsCacheKey = `dm_suggestions:${currentUser.id}`;
@@ -15696,7 +15837,7 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
   const dmStories = storiesResult.status === 'fulfilled' ? storiesResult.value : [];
   let dmNotes = notesResult.status === 'fulfilled' ? notesResult.value : [];
   const dmStoryByUsername = new Map();
-  const isStoryViewed = story => story?.viewed === true || story?.viewed === 1 || story?.viewed === 'true';
+  const isStoryViewed = story => storyLooksViewed(story);
   dmStories.forEach(story => {
     const key = String(story.username || '').toLowerCase();
     if (!key) return;
@@ -15781,14 +15922,46 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
         });
       }
     });
+    // Parmağı/fareyi basılı tutar tutmaz sohbeti çekmeye başla: navigate ile yarışır.
+    // Liste kaydırmayı istek yağmuruna çevirmemek için kısa bir gecikme ve
+    // parmak kaydıkça iptal vardır.
+    let prefetchTimer = null;
+    let prefetchStart = null;
+    const cancelPrefetchIntent = () => {
+      if (prefetchTimer) { clearTimeout(prefetchTimer); prefetchTimer = null; }
+      prefetchStart = null;
+    };
+    item.addEventListener('pointerdown', event => {
+      if (item.dataset.isGroup === '1') return;
+      if (event?.target?.closest?.('.dm-conv-options-btn, a')) return;
+      cancelPrefetchIntent();
+      prefetchStart = { x: event.clientX, y: event.clientY };
+      prefetchTimer = setTimeout(() => {
+        prefetchTimer = null;
+        prefetchDmConversation(item.dataset.username);
+      }, 70);
+    }, { passive: true });
+    item.addEventListener('pointermove', event => {
+      if (!prefetchStart) return;
+      if (Math.hypot(event.clientX - prefetchStart.x, event.clientY - prefetchStart.y) > 10) cancelPrefetchIntent();
+    }, { passive: true });
+    item.addEventListener('pointercancel', cancelPrefetchIntent, { passive: true });
+    item.addEventListener('pointerup', () => {
+      // Hızlı dokunuşta bekleme süresi dolmadan parmak kalkar; isteği hemen başlat.
+      const pending = Boolean(prefetchTimer);
+      cancelPrefetchIntent();
+      if (pending && item.dataset.isGroup !== '1') prefetchDmConversation(item.dataset.username);
+    }, { passive: true });
     item.addEventListener('click', event => {
       if (event?.target?.closest?.('.dm-conv-options-btn')) return;
       if (event?.target?.closest?.('a')) {
         event.preventDefault();
         event.stopPropagation();
       }
-      document.querySelectorAll('.dm-conv-item').forEach(other => other.classList.remove('active'));
-      item.classList.add('active');
+      // Seçili satır vurgusu yalnızca liste ve sohbetin yan yana durduğu
+      // masaüstünde anlamlı; dokunmatikte geride kalan bir kutu gibi görünüyordu.
+      document.querySelectorAll('.dm-conv-item.active').forEach(other => other.classList.remove('active'));
+      if (dmPrefersPointerSelection()) item.classList.add('active');
       if (item.dataset.isGroup === '1') navigate('/grup/' + item.dataset.groupSlug);
       else navigate('/mesajlar/' + item.dataset.username);
     });
@@ -15856,6 +16029,12 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
     const currentQuery = (document.getElementById('dm-search')?.value || '').toLocaleLowerCase('tr-TR');
     const suggestions = document.getElementById('dm-suggestions');
     if (suggestions) suggestions.hidden = !!currentQuery;
+    // Liste arka planda tazelendiğinde açık arama filtresi kaybolmasın.
+    if (currentQuery) {
+      list.querySelectorAll('.dm-conv-item').forEach(el => {
+        el.style.display = (el.dataset.searchName || '').toLocaleLowerCase('tr-TR').includes(currentQuery) ? '' : 'none';
+      });
+    }
     document.getElementById('dm-suggestions-retry')?.addEventListener('click', async event => {
       const button = event.currentTarget;
       button.disabled = true;
@@ -16367,10 +16546,12 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
           updateDmPresence(item, conversation.other_is_online, conversation.other_last_active, conversation.other_presence_visible);
         }
       });
-      if (targetUsername) {
+      // Kabuk yeniden kullanıldığı için açık sohbeti kapanıştan değil adresten oku.
+      const openChatUsername = decodeURIComponent((location.pathname.match(/^\/mesajlar\/([^/?]+)/) || [])[1] || '');
+      if (openChatUsername) {
         const chat = document.querySelector('.dm-chat');
         const activeConversation = updatedConversations.find(
-          conversation => String(conversation.other_username).toLowerCase() === String(targetUsername).toLowerCase()
+          conversation => String(conversation.other_username).toLowerCase() === openChatUsername.toLowerCase()
         );
         if (chat && activeConversation && chat.dataset.selfConversation !== 'true') {
           updateDmPresence(chat, activeConversation.other_is_online, activeConversation.other_last_active, activeConversation.other_presence_visible);
@@ -16378,7 +16559,7 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
           const headers = {};
           if (dmSearchUnlockCode) headers['X-DM-Search-Code'] = dmSearchUnlockCode;
           if (dmIconUnlockCode) headers['X-DM-Conversation-Code'] = dmIconUnlockCode;
-          const detail = await api(`/conversation/${encodeURIComponent(targetUsername)}?limit=1`, { headers });
+          const detail = await api(`/conversation/${encodeURIComponent(openChatUsername)}?limit=1`, { headers });
           if (detail.other && chat.dataset.selfConversation !== 'true') updateDmPresence(chat, detail.other.is_online, detail.other.last_active, detail.other.presence_visible);
         }
       }
@@ -16500,9 +16681,37 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
   // Conv item clicks
   bindConversationItems();
 
+  // Kabuk artık ekranda: sonraki liste <-> sohbet geçişleri hızlı yolu kullanır.
+  dmShellOwner = String(currentUser.id);
+  dmInboxRefreshAt = Date.now();
+  dmInboxRefresh = async () => {
+    if (!document.querySelector('.dm-layout')) { dmShellOwner = null; dmInboxRefresh = null; return; }
+    const [freshConvs, freshGroups, freshStories] = await Promise.allSettled([
+      api('/conversations'),
+      api('/my-groups'),
+      api('/stories')
+    ]);
+    if (!document.querySelector('.dm-layout')) return;
+    if (freshConvs.status === 'fulfilled') convs = freshConvs.value;
+    if (freshGroups.status === 'fulfilled') groups = freshGroups.value;
+    if (freshStories.status === 'fulfilled' && Array.isArray(freshStories.value)) {
+      dmStoryByUsername.clear();
+      freshStories.value.forEach(story => {
+        const key = String(story.username || '').toLowerCase();
+        if (!key) return;
+        const previous = dmStoryByUsername.get(key);
+        if (!previous || (isStoryViewed(previous) && !isStoryViewed(story)) || (isStoryViewed(previous) === isStoryViewed(story) && new Date(story.created_at || 0) > new Date(previous.created_at || 0))) {
+          dmStoryByUsername.set(key, story);
+        }
+      });
+    }
+    renderInboxList();
+  };
+
   if (targetUsername) {
-    const activeEl = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(targetUsername)}"]`);
-    if (activeEl) activeEl.classList.add('active');
+    if (dmPrefersPointerSelection()) {
+      document.querySelector(`.dm-conv-item[data-username="${CSS.escape(targetUsername)}"]`)?.classList.add('active');
+    }
     await renderDMChat(targetUsername);
   }
 }
@@ -16567,30 +16776,15 @@ async function openDmMessageSearch(conversationId) {
 const dmTemporaryUnlocks = new Map();
 
 async function renderDMChat(username) {
-  const renderGeneration = ++dmChatRenderGeneration;
+  teardownDmChatState();
+  const renderGeneration = dmChatRenderGeneration;
   applyChatWallpaper();
-  dmMessageResizeObserver?.disconnect();
-  dmMessageMutationObserver?.disconnect();
-  dmMessageResizeObserver = null;
-  dmMessageMutationObserver = null;
-  window.__dmSharedSongAudio?.pause();
-  window.__dmSharedSongAudio = null;
-  window.__dmSharedSongButton = null;
-  exitDmSelection();
-  // Önceki poll'u temizle
-  if (dmPollTimer) { clearInterval(dmPollTimer); dmPollTimer = null; }
-  stopLocalDmTyping();
-  if (dmPeerTypingTimer) { clearTimeout(dmPeerTypingTimer); dmPeerTypingTimer = null; }
 
   const mainEl = document.getElementById('dm-main');
   if (!mainEl) return;
-  mainEl.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%"><div class="spinner"></div></div>`;
+  mainEl.innerHTML = `<div class="dm-chat-loading"><div class="spinner"></div></div>`;
 
-  const searchUnlockHeaders = dmSearchUnlockCode ? { 'X-DM-Search-Code': dmSearchUnlockCode } : {};
-  if (dmIconUnlockCode) searchUnlockHeaders['X-DM-Conversation-Code'] = dmIconUnlockCode;
-  const temporaryUnlock = dmTemporaryUnlocks.get(String(username).toLocaleLowerCase('tr-TR'));
-  if (temporaryUnlock?.password) searchUnlockHeaders['X-DM-Conversation-Password'] = temporaryUnlock.password;
-  if (temporaryUnlock?.accountCode) searchUnlockHeaders['X-DM-Conversation-Code'] = temporaryUnlock.accountCode;
+  const searchUnlockHeaders = dmUnlockHeadersFor(username);
   const isCurrentChatRender = () => {
     if (renderGeneration !== dmChatRenderGeneration) return false;
     const currentChatPath = location.pathname.match(/^\/mesajlar\/([^/?]+)/);
@@ -16600,10 +16794,18 @@ async function renderDMChat(username) {
   const requestedMessageId = Number(new URLSearchParams(location.search).get('message_id')) || 0;
   let data;
   try {
-    const conversationUrl = requestedMessageId
-      ? `/conversation/${encodeURIComponent(username)}?around_id=${encodeURIComponent(requestedMessageId)}`
-      : `/conversation/${encodeURIComponent(username)}`;
-    data = await api(conversationUrl, { headers: searchUnlockHeaders });
+    // Listeye dokunulduğu anda başlatılan istek hazırsa onu kullan, yeniden sorma.
+    const prefetched = requestedMessageId ? null : takeDmConversationPrefetch(username, searchUnlockHeaders);
+    if (prefetched) {
+      const settled = await prefetched;
+      if (settled.ok) data = settled.data;
+      else throw settled.error;
+    } else {
+      const conversationUrl = requestedMessageId
+        ? `/conversation/${encodeURIComponent(username)}?around_id=${encodeURIComponent(requestedMessageId)}`
+        : `/conversation/${encodeURIComponent(username)}`;
+      data = await api(conversationUrl, { headers: searchUnlockHeaders });
+    }
   }
   catch (e) {
     if (!isCurrentChatRender()) return;
@@ -22635,15 +22837,16 @@ async function loadStoriesBar(container) {
     if (!visibleGroups.length && !currentUser) { container.innerHTML = ''; return; }
     const ownGroup = visibleGroups.find(group => group.user_id === ownUserId);
     const otherGroups = visibleGroups.filter(group => group.user_id !== ownUserId);
-    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? `<div class="story-own-wrap ${ownGroup ? 'has-story' : 'no-story'} ${ownGroup && ownGroup.stories.every(story => story.viewed) ? 'viewed' : ''}"><button type="button" class="story-user story-own" data-story-group="-1"><span class="story-ring">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>Hikayen</small></button><button type="button" class="story-add-corner" id="story-add-btn" aria-label="Hikaye ekle"><i class="fas fa-plus"></i></button></div>` : ''}${otherGroups.map((group, index) => `<button type="button" class="story-user ${group.stories.every(story => story.viewed) ? 'viewed' : ''}${group.stories.some(story => Number(story.close_friends_only) === 1 || story.close_friends_only === true) ? ' is-close-friends' : ''}" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}${group.stories.some(story => Number(story.close_friends_only) === 1 || story.close_friends_only === true) ? '<i class="fas fa-star story-close-mark" title="Yakın arkadaşlara özel"></i>' : ''}</span><small>${escHtml(group.username)}${redVerificationIconHTML(group.is_red_verified, group.red_verified_at)}</small></button>`).join('')}</div></div>`;
+    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? `<div class="story-own-wrap ${ownGroup ? 'has-story' : 'no-story'} ${ownGroup && ownGroup.stories.every(story => storyLooksViewed(story)) ? 'viewed' : ''}"><button type="button" class="story-user story-own" data-story-group="-1"><span class="story-ring">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>Hikayen</small></button><button type="button" class="story-add-corner" id="story-add-btn" aria-label="Hikaye ekle"><i class="fas fa-plus"></i></button></div>` : ''}${otherGroups.map((group, index) => `<button type="button" class="story-user ${group.stories.every(story => storyLooksViewed(story)) ? 'viewed' : ''}${group.stories.some(story => Number(story.close_friends_only) === 1 || story.close_friends_only === true) ? ' is-close-friends' : ''}" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}${group.stories.some(story => Number(story.close_friends_only) === 1 || story.close_friends_only === true) ? '<i class="fas fa-star story-close-mark" title="Yakın arkadaşlara özel"></i>' : ''}</span><small>${escHtml(group.username)}${redVerificationIconHTML(group.is_red_verified, group.red_verified_at)}</small></button>`).join('')}</div></div>`;
     const openGroup = index => {
       const group = groupedStories[index];
-      let storyIndex = group.stories.findIndex(story => !story.viewed);
+      let storyIndex = group.stories.findIndex(story => !storyLooksViewed(story));
       if (storyIndex < 0) storyIndex = 0;
       const render = () => {
         const story = group.stories[storyIndex];
         const storyKey = story.public_id || story.id;
         story.viewed = true;
+        markStorySeenLocally(story);
         const previousStoryAudio = activeStoryAudio;
         const previousStoryAudioPlaying = Boolean(previousStoryAudio && !previousStoryAudio.paused);
         if (activeStoryAudio) { activeStoryAudio.pause(); untrackMediaAudio(activeStoryAudio); activeStoryAudio.src = ''; activeStoryAudio = null; }
@@ -23352,6 +23555,7 @@ async function renderStoryRoute(app, storyId) {
       </div>
     </div>`;
     bindStoryVideoToggle($('#story-route-video'), $('#story-route-video-toggle'));
+    markStorySeenLocally(story);
     api('/stories/' + encodeURIComponent(story.public_id || story.id) + '/view', { method: 'POST' }).catch(() => {});
     $('#story-route-prev')?.addEventListener('click', () => navigateToStory(previousStory));
     $('#story-route-next')?.addEventListener('click', () => navigateToStory(nextStory));

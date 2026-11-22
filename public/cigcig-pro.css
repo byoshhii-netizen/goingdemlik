@@ -4083,3 +4083,33 @@ input[type="range"] { min-height: 0 !important; }
 @media (max-width: 520px) {
   #pl-listen-together { width: 100%; justify-content: center; }
 }
+
+/* ───────────────────────────────────────────────────────────────
+   Mesaj listesi: dokunma geri bildirimi ve sohbet açılış durumu
+   ─────────────────────────────────────────────────────────────── */
+/* Dokunmatikte tarayıcı :hover'ı tap sonrası satırda bırakıyordu; seçili
+   satır kutusu da yalnızca liste ve sohbet yan yanayken anlamlı. */
+@media (hover: none), (pointer: coarse) {
+  .dm-conv-item:hover,
+  .dm-conv-item.active {
+    background: transparent;
+    border-color: transparent;
+  }
+  .dm-conv-item:active {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: transparent;
+    transition: background 60ms linear;
+  }
+}
+@media (max-width: 899px) {
+  .dm-conv-item.active { background: transparent; border-color: transparent; }
+}
+/* Sohbet yüklenirken boş alan sıçramasın */
+.dm-chat-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 180px;
+  height: 100%;
+}

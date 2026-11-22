@@ -8068,7 +8068,7 @@ app.get('/api/stories/:id', optionalAuth, async (req, res) => {
   u.username,u.avatar,u.avatar_removed,u.is_private,u.is_red_verified,u.red_verified_at,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$2) AS liked,
       (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
-      (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id) AS total_views,
+      (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id AND sv.viewer_id<>s.user_id) AS total_views,
       CASE WHEN s.user_id=$2 THEN 1 ELSE 0 END AS is_owner
     FROM stories s JOIN users u ON u.id=s.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs song ON song.id=s.song_id
     WHERE (s.public_id=$1 OR s.id::text=$1) AND (s.expires_at>NOW() OR COALESCE(s.is_permanent,0)=1)
@@ -8154,10 +8154,9 @@ app.post('/api/stories/:id/view', optionalAuth, async (req, res) => {
   const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND (s.expires_at>NOW() OR COALESCE(s.is_permanent,0)=1) AND s.is_suspended=0 AND NOT EXISTS(SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id) AND ${closeFriendsVisibilitySql('s', '$2')} AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, viewerId]);
   if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   await recordContentView('story', story[0].id, req);
-  // Kendi hikayeni izlemek "görüldü" sayılmaz
-  const { rows: ownerRows } = await query('SELECT user_id FROM stories WHERE id=$1', [story[0].id]);
-  const isOwnStory = req.user?.id && String(ownerRows[0]?.user_id) === String(req.user.id);
-  if (req.user?.id && !isOwnStory) {
+  // Kendi hikayeni izlemek de "görüldü" izi bırakır (halka soluklaşsın), ancak
+  // izleyen listesinde ve görüntülenme sayısında sahip gösterilmez.
+  if (req.user?.id) {
     await query(`INSERT INTO story_views (story_id,viewer_id,view_count,viewed_at)
       VALUES ($1,$2,1,NOW())
       ON CONFLICT (story_id,viewer_id)
@@ -8191,7 +8190,7 @@ app.get('/api/stories/:id/viewers', authMiddleware, async (req, res) => {
   const { rows: owner } = await query('SELECT id,user_id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
   if (!owner.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   if (owner[0].user_id !== req.user.id) return res.status(403).json({ error: 'Görüntüleyenleri görme yetkiniz yok' });
-  const { rows } = await query(`SELECT sv.viewer_id,sv.view_count,sv.viewed_at,u.username,u.avatar FROM story_views sv JOIN users u ON u.id=sv.viewer_id WHERE sv.story_id=$1 ORDER BY sv.viewed_at DESC`, [owner[0].id]);
+  const { rows } = await query(`SELECT sv.viewer_id,sv.view_count,sv.viewed_at,u.username,u.avatar FROM story_views sv JOIN users u ON u.id=sv.viewer_id WHERE sv.story_id=$1 AND sv.viewer_id<>$2 ORDER BY sv.viewed_at DESC`, [owner[0].id, owner[0].user_id]);
   res.json(rows);
 });
 
