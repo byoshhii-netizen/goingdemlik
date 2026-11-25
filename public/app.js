@@ -6534,7 +6534,6 @@ async function renderPoemList(app) {
     <div class="container page poems-page">
       <header class="poems-hero">
         <div class="poems-hero-text">
-          <span class="poems-hero-eyebrow"><i class="fas fa-feather-pointed"></i> ŞİİR KÖŞESİ</span>
           <h1 class="poems-hero-title">Şiirler</h1>
         </div>
         <div class="poems-hero-actions">
