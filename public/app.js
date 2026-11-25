@@ -6536,7 +6536,6 @@ async function renderPoemList(app) {
         <div class="poems-hero-text">
           <span class="poems-hero-eyebrow"><i class="fas fa-feather-pointed"></i> ŞİİR KÖŞESİ</span>
           <h1 class="poems-hero-title">Şiirler</h1>
-          <p class="poems-hero-sub">Mısra mısra duyguların ve kelimelerin durağı. Yaz, oku, beğen, ilet.</p>
         </div>
         <div class="poems-hero-actions">
           ${currentUser ? '<button id="poems-new-btn" class="btn btn-primary"><i class="fas fa-pen-nib"></i> Yeni Şiir</button>' : '<a href="/giris" data-link class="btn btn-primary"><i class="fas fa-pen-nib"></i> Giriş yap ve yaz</a>'}
