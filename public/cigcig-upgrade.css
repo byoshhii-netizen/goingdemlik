@@ -847,3 +847,231 @@ img[src*=".gif"] {
   /* iOS'ta odaklanınca yakınlaşmayı önlemek için 16px taban */
   .comments-section .comment-form textarea { font-size: 16px; }
 }
+
+/* Instagram-benzeri yorum görünümü — kart/balon hissini kaldırır */
+.comments-section,
+.ig-comments-panel,
+.reals-comments-panel,
+.newspaper-comments-card {
+  --ig-comment-text: var(--text-primary);
+}
+
+.comments-section .comment,
+.ig-comments-list .comment,
+.reals-comments-list .comment,
+.newspaper-comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1px solid rgba(127, 127, 127, .12);
+  background: transparent;
+}
+
+.comments-section .comment-node:last-child > .comment,
+.ig-comments-list .comment:last-child,
+.reals-comments-list .comment:last-child,
+.newspaper-comment:last-child {
+  border-bottom: 0;
+}
+
+.comments-section .comment-body,
+.ig-comments-list .comment-body,
+.reals-comments-list .comment-body,
+.newspaper-comment-main {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.comments-section .comment-body:hover,
+.ig-comments-list .comment-body:hover,
+.reals-comments-list .comment-body:hover {
+  border: 0;
+  background: transparent;
+}
+
+.comments-section .comment-avatar-link,
+.comments-section .comment > .comment-avatar,
+.comments-section .comment .comment-avatar,
+.ig-comments-list .comment-avatar,
+.reals-comments-list .comment-avatar,
+.newspaper-comment > .avatar-sm,
+.newspaper-comment > .comment-avatar,
+.newspaper-comment > img {
+  width: 36px !important;
+  height: 36px !important;
+  flex: 0 0 36px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.comments-section .comment-header,
+.ig-comments-list .comment-header,
+.reals-comments-list .comment-header,
+.newspaper-comment-top {
+  align-items: baseline;
+  gap: 6px;
+  margin: 0 0 2px;
+}
+
+.comments-section .comment-author,
+.ig-comments-list .comment-author,
+.reals-comments-list .comment-author,
+.newspaper-comment-top > a,
+.newspaper-comment-top .user-display-identity strong {
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.comments-section .comment-content,
+.ig-comments-list .comment-content,
+.reals-comments-list .comment-content,
+.newspaper-comment-main > p {
+  margin: 2px 0 0;
+  font-size: 14px;
+  line-height: 1.48;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  color: var(--ig-comment-text);
+}
+
+.comments-section .comment-time,
+.ig-comments-list .comment-time,
+.reals-comments-list .comment-time,
+.newspaper-comment-top time {
+  margin-left: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.comments-section .comment-actions,
+.ig-comments-list .comment-actions,
+.reals-comments-list .photo-sheet-comment-actions,
+.newspaper-comment-actions {
+  justify-content: flex-start;
+  gap: 12px;
+  margin-top: 5px;
+  min-height: 24px;
+}
+
+.comments-section .comment-actions .reply-comment-btn,
+.comments-section .comment-actions .del-comment,
+.comments-section .comment-actions .like-comment-btn,
+.ig-comments-list .video-comment-like,
+.ig-comments-list .video-comment-edit,
+.ig-comments-list .video-comment-delete,
+.ig-comments-list .video-comment-pin,
+.reals-comments-list .photo-sheet-comment-actions .btn,
+.newspaper-comment-actions button {
+  min-height: 24px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.comments-section .comment-actions .like-comment-btn,
+.ig-comments-list .video-comment-like {
+  position: absolute;
+  right: 14px;
+  margin: 0;
+  padding: 6px;
+  border-radius: 50%;
+}
+
+.comments-section .comment-node,
+.ig-comments-list .comment,
+.reals-comments-list .comment {
+  position: relative;
+}
+
+.comments-section .comment-replies {
+  margin: 0 0 0 46px;
+  padding-left: 12px;
+  border-left: 1px solid rgba(127, 127, 127, .18);
+}
+
+.comments-section .comment-form,
+.ig-comment-form,
+.reals-comment-form,
+.newspaper-comment-form {
+  border: 0;
+  border-top: 1px solid rgba(127, 127, 127, .12);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.comments-section .comment-form {
+  padding: 10px 0 12px;
+  align-items: flex-end;
+}
+
+.comments-section .comment-form:focus-within {
+  border-top-color: rgba(127, 127, 127, .12);
+  box-shadow: none;
+}
+
+.comments-section .comment-form textarea,
+.ig-comment-form textarea,
+.reals-comment-form input,
+.newspaper-comment-form textarea {
+  border: 0;
+  border-radius: 18px;
+  background: var(--bg-card2);
+  box-shadow: none;
+}
+
+.ig-comments-list,
+.reals-comments-list {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(127,127,127,.35) transparent;
+}
+
+.ig-comments-list .comment-content,
+.reals-comments-list .comment-content {
+  color: var(--text-primary);
+}
+
+@media (max-width: 720px) {
+  .comments-section .comment,
+  .ig-comments-list .comment,
+  .reals-comments-list .comment,
+  .newspaper-comment {
+    gap: 8px;
+    padding: 9px 0;
+  }
+  .comments-section .comment-avatar-link,
+  .comments-section .comment > .comment-avatar,
+  .comments-section .comment .comment-avatar,
+  .ig-comments-list .comment-avatar,
+  .reals-comments-list .comment-avatar,
+  .newspaper-comment > .avatar-sm,
+  .newspaper-comment > .comment-avatar,
+  .newspaper-comment > img {
+    width: 34px !important;
+    height: 34px !important;
+    flex-basis: 34px;
+  }
+  .comments-section .comment-content,
+  .ig-comments-list .comment-content,
+  .reals-comments-list .comment-content {
+    font-size: 13.5px;
+  }
+  .comments-section .comment-replies {
+    margin-left: 42px;
+  }
+}
