@@ -6103,6 +6103,23 @@ async function renderSettings(main) {
           <div class="adm-feature-copy"><strong>Reals tamamen kapat</strong><p>Açıldığında Reals özelliği site üzerindeki hiçbir yerde görünmez: üst menü, profil sekmesi, oluştur menüsü ve mobil alt barda Reals bağlantıları gizlenir. Kullanıcıların mevcut Reals verileri <u>silinmez</u>; sunucuda saklanır. Kapatma işareti kaldırıldığında her şey tekrar yerine gelir.</p></div>
           <label class="adm-toggle-row" for="s-reals-fully-disabled"><span><i class="fas fa-circle-pause"></i> Reals'ı tamamen kapat</span><span class="adm-toggle"><input type="checkbox" id="s-reals-fully-disabled" ${settings['reals_fully_disabled'] === '1' ? 'checked' : ''}><span></span></span></label>
           <div class="form-group"><label>Kapalıyken gösterilecek mesaj</label><textarea id="s-reals-disabled-message" rows="2" maxlength="400">${escHtml(settings['reals_disabled_message'] || 'Reals özelliği şu anda kapalı.')}</textarea></div>
+          <div class="form-group"><label>Reals kapalıyken mobil alt bardaki Reals ikonunun yerine gelecek sayfa</label>
+            <select id="s-reals-replacement-page">
+              <option value="" ${!settings['reals_replacement_page'] ? 'selected' : ''}>— Hiçbiri (ikonu tamamen gizle) —</option>
+              <option value="siirler" ${settings['reals_replacement_page'] === 'siirler' ? 'selected' : ''}>Şiirler (/siirler)</option>
+              <option value="forum" ${settings['reals_replacement_page'] === 'forum' ? 'selected' : ''}>Konular (/forum)</option>
+              <option value="gazeteler" ${settings['reals_replacement_page'] === 'gazeteler' ? 'selected' : ''}>Gazeteler (/gazeteler)</option>
+              <option value="kitaplar" ${settings['reals_replacement_page'] === 'kitaplar' ? 'selected' : ''}>Kitaplar (/kitaplar)</option>
+              <option value="videolar" ${settings['reals_replacement_page'] === 'videolar' ? 'selected' : ''}>Videolar (/videolar)</option>
+              <option value="muzikler" ${settings['reals_replacement_page'] === 'muzikler' ? 'selected' : ''}>Müzikler (/muzikler)</option>
+              <option value="fotograflar" ${settings['reals_replacement_page'] === 'fotograflar' ? 'selected' : ''}>Fotoğraflar (/fotograflar)</option>
+              <option value="medyakesfet" ${settings['reals_replacement_page'] === 'medyakesfet' ? 'selected' : ''}>Keşfet (/medyakesfet)</option>
+              <option value="gruplar" ${settings['reals_replacement_page'] === 'gruplar' ? 'selected' : ''}>Gruplar (/gruplar)</option>
+              <option value="arkadaslar" ${settings['reals_replacement_page'] === 'arkadaslar' ? 'selected' : ''}>Arkadaşlar (/arkadaslar)</option>
+              <option value="magaza" ${settings['reals_replacement_page'] === 'magaza' ? 'selected' : ''}>Mağaza (/magaza)</option>
+            </select>
+            <small style="display:block;margin-top:6px;color:var(--text-muted)">Seçilen sayfanın kendi ikonu, telefon alt barındaki Reals ikonunun olduğu yere gelir. "Hiçbiri" seçilirse ikon tamamen kaybolur (eski davranış).</small>
+          </div>
           <div class="adm-feature-copy"><strong>Reals bilgi düğmesi</strong><p>Açıksa soru işareti, her kullanıcının Reals sayfasına ilk girişinde bir kez görünür. Kapalıysa hiç gösterilmez.</p></div>
           <label class="adm-toggle-row" for="s-reals-info-enabled"><span><i class="fas fa-circle-question"></i> İlk Reals ziyaretinde göster</span><span class="adm-toggle"><input type="checkbox" id="s-reals-info-enabled" ${settings['reals_info_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
           <div class="form-group"><label>Reals ilk hatırlatma metni (kısa)</label><textarea id="s-reals-reminder" rows="3">${escHtml(settings['reals_reminder']||'')}</textarea></div>
@@ -6579,6 +6596,7 @@ async function renderSettings(main) {
     if (!await saveSetting('reals_in_media_enabled', document.getElementById('s-reals-in-media-enabled').checked ? '1' : '0', msg, false)) return;
     if (!await saveSetting('reals_fully_disabled', document.getElementById('s-reals-fully-disabled').checked ? '1' : '0', msg, false)) return;
     if (!await saveSetting('reals_disabled_message', document.getElementById('s-reals-disabled-message').value.trim(), msg, false)) return;
+    if (!await saveSetting('reals_replacement_page', document.getElementById('s-reals-replacement-page').value, msg, false)) return;
     toast('Reals ayarları kaydedildi');
     msg.style.color='var(--green)'; msg.textContent='✓ Reals ayarları kaydedildi';
   });

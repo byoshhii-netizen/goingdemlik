@@ -10728,6 +10728,13 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
     }
     value = String(value);
   }
+  if (key === 'reals_replacement_page') {
+    const allowedPages = new Set(['', 'siirler', 'forum', 'gazeteler', 'kitaplar', 'videolar', 'muzikler', 'fotograflar', 'medyakesfet', 'gruplar', 'arkadaslar', 'magaza']);
+    value = String(value || '').trim().toLowerCase();
+    if (!allowedPages.has(value)) {
+      return res.status(400).json({ error: 'Geçerli bir sayfa seçin veya boş bırakın' });
+    }
+  }
   const newspaperTextLimits = {
     newspaper_left_quote: 180,
     newspaper_right_quote: 260,
@@ -16751,7 +16758,7 @@ app.get('/api/reals', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/reals-settings', async (req, res) => {
-  const { rows } = await query("SELECT key,value FROM settings WHERE key = ANY($1)", [['reals_reminder', 'reals_info_enabled', 'reals_maintenance_enabled', 'reals_maintenance_message', 'reals_in_media_enabled', 'reals_fully_disabled', 'reals_disabled_message']]);
+  const { rows } = await query("SELECT key,value FROM settings WHERE key = ANY($1)", [['reals_reminder', 'reals_info_enabled', 'reals_maintenance_enabled', 'reals_maintenance_message', 'reals_in_media_enabled', 'reals_fully_disabled', 'reals_disabled_message', 'reals_replacement_page']]);
   const settings = Object.fromEntries(rows.map(row => [row.key, row.value]));
   const fullyDisabled = settings.reals_fully_disabled === '1';
   res.json({
@@ -16762,7 +16769,10 @@ app.get('/api/reals-settings', async (req, res) => {
     maintenanceEnabled: !fullyDisabled && settings.reals_maintenance_enabled === '1',
     maintenanceMessage: settings.reals_maintenance_message || DEFAULT_REALS_MAINTENANCE_MESSAGE,
     fullyDisabled,
-    disabledMessage: settings.reals_disabled_message || DEFAULT_REALS_DISABLED_MESSAGE
+    disabledMessage: settings.reals_disabled_message || DEFAULT_REALS_DISABLED_MESSAGE,
+    // Kapalıyken mobil alt bardaki Reals ikonu yerine gelecek sayfa anahtarı.
+    // Boş ise alt bardaki Reals ikonu tamamen gizlenir (eski davranış).
+    replacementPage: settings.reals_replacement_page || ''
   });
 });
 

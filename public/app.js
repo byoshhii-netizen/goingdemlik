@@ -2546,6 +2546,54 @@ function renderRealsMaintenanceScreen(app, message, opts = {}) {
       </div>`;
 }
 
+// Alt bardaki Reals ikonunu, admin'in seçtiği sayfayla değiştirir (Reals tamamen kapalıysa).
+// Seçim yoksa ya da Reals açıksa, orijinal /reals linkini geri getirir ve CSS ikonu gizler.
+const REALS_REPLACEMENT_PAGES = {
+  siirler:     { href: '/siirler',     icon: 'fa-feather-pointed', label: 'Şiirler' },
+  forum:       { href: '/forum',       icon: 'fa-comments',        label: 'Konular' },
+  gazeteler:   { href: '/gazeteler',   icon: 'fa-newspaper',       label: 'Gazeteler' },
+  kitaplar:    { href: '/kitaplar',    icon: 'fa-book-open',       label: 'Kitaplar' },
+  videolar:    { href: '/video',       icon: 'fa-video',           label: 'Videolar' },
+  muzikler:    { href: '/muzikler',    icon: 'fa-music',           label: 'Müzikler' },
+  fotograflar: { href: '/fotograflar', icon: 'fa-image',           label: 'Fotoğraflar' },
+  medyakesfet: { href: '/medyakesfet', icon: 'fa-magnifying-glass', label: 'Keşfet' },
+  gruplar:     { href: '/gruplar',     icon: 'fa-users',           label: 'Gruplar' },
+  arkadaslar:  { href: '/arkadaslar',  icon: 'fa-user-friends',    label: 'Arkadaşlar' },
+  magaza:      { href: '/magaza',      icon: 'fa-store',           label: 'Mağaza' }
+};
+
+function applyRealsBottomReplacement(rs) {
+  const a = document.getElementById('mbb-reals');
+  if (!a) return;
+  const icon = a.querySelector('i');
+  // İlk kurulumda orijinal değerleri sakla ki kapatılınca geri döndürebilelim.
+  if (!a.dataset.origHref) {
+    a.dataset.origHref = a.getAttribute('href') || '/reals';
+    a.dataset.origIcon = icon ? icon.className : 'fas fa-circle-play';
+    a.dataset.origLabel = a.getAttribute('aria-label') || 'Reals';
+  }
+  const fully = !!(rs && rs.fullyDisabled);
+  const key = rs && rs.replacementPage ? String(rs.replacementPage).toLowerCase() : '';
+  const pick = fully && key ? REALS_REPLACEMENT_PAGES[key] : null;
+  if (pick) {
+    // Reals kapalı + değiştirici sayfa seçili: ikonu ve linki yeniden yazıp CSS'in gizlemesine izin verme.
+    a.setAttribute('href', pick.href);
+    a.setAttribute('aria-label', pick.label);
+    a.setAttribute('title', pick.label);
+    a.dataset.realsReplacement = '1';
+    if (icon) icon.className = 'fas ' + pick.icon;
+    document.body.classList.add('reals-has-replacement');
+  } else {
+    // Reals açık ya da seçim yok: orijinal haline döndür.
+    a.setAttribute('href', a.dataset.origHref);
+    a.setAttribute('aria-label', a.dataset.origLabel);
+    a.setAttribute('title', a.dataset.origLabel);
+    delete a.dataset.realsReplacement;
+    if (icon) icon.className = a.dataset.origIcon;
+    document.body.classList.remove('reals-has-replacement');
+  }
+}
+
 function isAppleMobileBrowser() {
   const userAgent = navigator.userAgent || '';
   return /iPhone|iPad|iPod/i.test(userAgent)
@@ -15454,10 +15502,12 @@ async function init() {
   }
   startAppVersionPolling();
   // Reals tamamen kapalıysa tüm nav/menü girişlerini gizle (veri silinmez; açılınca geri gelir).
+  // Kapalıyken alt bardaki Reals ikonunun yerine, admin panelden seçilen bir sayfa koyulabilir.
   try {
     const rs = await api('/reals-settings');
     window.__realsFullyDisabled = !!rs.fullyDisabled;
     document.body.classList.toggle('reals-fully-disabled', !!rs.fullyDisabled);
+    applyRealsBottomReplacement(rs);
   } catch (error) {
     console.warn('Reals ayarları yüklenemedi:', error.message);
   }
