@@ -1914,6 +1914,8 @@ function renderContent(text) {
       ? `<a href="${imageHref}" target="_blank" rel="noopener noreferrer" class="inline-image-link"><img src="${imageHref}" alt="Paylaşılan görsel" loading="lazy" /></a>`
       : `<a href="${href}" target="_blank" rel="noopener noreferrer" class="inline-link" data-preview-url="${href}">${url}</a>`);
   });
+  // WhatsApp/Instagram tarzı: yazdığın satır sonları korunsun (XSS güvenli, escape'ten sonra yapıyoruz)
+  safe = safe.replace(/\r\n?/g, '\n').replace(/\n/g, '<br>');
   return safe;
 }
 
@@ -2523,22 +2525,23 @@ function generateVideoPoster(file) {
   });
 }
 
-function renderRealsMaintenanceScreen(app, message) {
+function renderRealsMaintenanceScreen(app, message, opts = {}) {
+  const fully = !!opts.fullyDisabled;
   app.innerHTML = `
-      <div class="reals-container reals-maintenance-shell">
+      <div class="reals-container reals-maintenance-shell${fully ? ' reals-fully-disabled-shell' : ''}">
         <section class="reals-maintenance-card" role="status" aria-labelledby="reals-maintenance-title">
           <div class="reals-maintenance-art" aria-hidden="true">
             <span class="reals-maintenance-orbit reals-maintenance-orbit-one"></span>
             <span class="reals-maintenance-orbit reals-maintenance-orbit-two"></span>
-            <span class="reals-maintenance-icon"><i class="fas fa-screwdriver-wrench"></i></span>
+            <span class="reals-maintenance-icon"><i class="fas ${fully ? 'fa-circle-pause' : 'fa-screwdriver-wrench'}"></i></span>
             <span class="reals-maintenance-spark reals-maintenance-spark-one"><i class="fas fa-star"></i></span>
             <span class="reals-maintenance-spark reals-maintenance-spark-two"><i class="fas fa-sparkles"></i></span>
           </div>
-          <span class="reals-maintenance-eyebrow"><span></span> BİR ŞEYLER YENİLENİYOR</span>
-          <h1 id="reals-maintenance-title">Reals yeniden tasarlanıyor</h1>
-          <p class="reals-maintenance-message">${escHtml(message || 'Reals şu anda bakımda. En iyi hizmeti verebilmek için baştan tasarlıyoruz.')}</p>
-          <div class="reals-maintenance-progress" aria-hidden="true"><span></span></div>
-          <div class="reals-maintenance-footnote"><i class="fas fa-heart"></i><span>En iyi deneyim için çalışıyoruz</span></div>
+          <span class="reals-maintenance-eyebrow"><span></span> ${fully ? 'REALS KAPALI' : 'BİR ŞEYLER YENİLENİYOR'}</span>
+          <h1 id="reals-maintenance-title">${fully ? 'Reals şu anda kapalı' : 'Reals yeniden tasarlanıyor'}</h1>
+          <p class="reals-maintenance-message">${escHtml(message || (fully ? 'Reals özelliği şu anda kapalı.' : 'Reals şu anda bakımda. En iyi hizmeti verebilmek için baştan tasarlıyoruz.'))}</p>
+          ${fully ? '' : '<div class="reals-maintenance-progress" aria-hidden="true"><span></span></div>'}
+          <div class="reals-maintenance-footnote"><i class="fas ${fully ? 'fa-moon' : 'fa-heart'}"></i><span>${fully ? 'Açılınca her şey yerinde olacak.' : 'En iyi deneyim için çalışıyoruz'}</span></div>
         </section>
       </div>`;
 }
@@ -2653,6 +2656,11 @@ async function renderRealsFeed(app, initialId = null) {
     return;
   }
   if (!app.isConnected || !onReelsRoute()) return;
+  window.__realsFullyDisabled = !!realsInfoSettings.fullyDisabled;
+  if (realsInfoSettings.fullyDisabled) {
+    renderRealsMaintenanceScreen(app, realsInfoSettings.disabledMessage || 'Reals özelliği şu anda kapalı.', { fullyDisabled: true });
+    return;
+  }
   if (realsInfoSettings.maintenanceEnabled) {
     renderRealsMaintenanceScreen(app, realsInfoSettings.maintenanceMessage);
     return;
@@ -2666,6 +2674,7 @@ async function renderRealsFeed(app, initialId = null) {
         return;
       }
     } catch (error) {
+      if (error.data?.code === 'REALS_DISABLED') { renderRealsMaintenanceScreen(app, error.data.error, { fullyDisabled: true }); return; }
       if (error.data?.code === 'REALS_MAINTENANCE') { renderRealsMaintenanceScreen(app, error.data.error); return; }
       app.innerHTML = `<div class="ig-reels"><div class="ig-reels-message" role="alert"><span class="ig-reels-message-icon"><i class="fas fa-lock"></i></span><strong>Reals'a erişilemedi</strong><span>${escHtml(error.message || 'Reals erişimi doğrulanamadı.')}</span></div></div>`;
       return;
@@ -2685,6 +2694,7 @@ async function renderRealsFeed(app, initialId = null) {
   if (!root || !feed) return;
 
   if (realsResult.status === 'rejected') {
+    if (realsResult.reason?.data?.code === 'REALS_DISABLED') { renderRealsMaintenanceScreen(app, realsResult.reason.data.error, { fullyDisabled: true }); return; }
     if (realsResult.reason?.data?.code === 'REALS_MAINTENANCE') { renderRealsMaintenanceScreen(app, realsResult.reason.data.error); return; }
     feed.innerHTML = `<div class="ig-reels-message" role="alert"><span class="ig-reels-message-icon"><i class="fas fa-wifi"></i></span><strong>Akışa ulaşılamadı</strong><span>${escHtml(realsResult.reason?.message || 'Reals akışı yüklenemedi.')}</span><button type="button" class="ig-reels-pill-btn" id="ig-reels-retry">Tekrar dene</button></div>`;
     feed.querySelector('#ig-reels-retry')?.addEventListener('click', () => renderRealsFeed(app, initialId));
@@ -4676,12 +4686,17 @@ async function renderHome(app) {
 
   async function renderRealsSection() {
     let maintenanceEnabled = false;
+    let fullyDisabled = false;
     try {
-      maintenanceEnabled = (await api('/reals-settings')).maintenanceEnabled;
+      const s = await api('/reals-settings');
+      maintenanceEnabled = s.maintenanceEnabled;
+      fullyDisabled = s.fullyDisabled;
+      window.__realsFullyDisabled = !!fullyDisabled;
     } catch (error) {
       console.warn('Reals bakım durumu yüklenemedi:', error.message || error);
     }
-    if (maintenanceEnabled) return;
+    // Reals tamamen kapalıysa anasayfada hiç bölüm açılmasın; bakımdaysa yine gizle (var olan davranış).
+    if (maintenanceEnabled || fullyDisabled) return;
     const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Öne Çıkan Reals</div><a href="/reals" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-reals" class="video-list-grid"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     try {
@@ -6468,11 +6483,26 @@ async function renderPoemList(app) {
   document.title = 'Şiirler – ' + siteName;
   updatePageMeta('Şiirler – ' + siteName, 'Paylaştığın şiirleri okuyup beğen, yorum yaz, gizli tut.', '');
   app.innerHTML = `
-    <div class="container page">
-      <div class="content-create-header">
-        <h1 class="page-title"><i class="fas fa-pen-fancy" style="color:var(--accent-red2);margin-right:8px"></i>Şiirler</h1>
+    <div class="container page poems-page">
+      <header class="poems-hero">
+        <div class="poems-hero-text">
+          <span class="poems-hero-eyebrow"><i class="fas fa-feather-pointed"></i> ŞİİR KÖŞESİ</span>
+          <h1 class="poems-hero-title">Şiirler</h1>
+          <p class="poems-hero-sub">Mısra mısra duyguların ve kelimelerin durağı. Yaz, oku, beğen, ilet.</p>
+        </div>
+        <div class="poems-hero-actions">
+          ${currentUser ? '<button id="poems-new-btn" class="btn btn-primary"><i class="fas fa-pen-nib"></i> Yeni Şiir</button>' : '<a href="/giris" data-link class="btn btn-primary"><i class="fas fa-pen-nib"></i> Giriş yap ve yaz</a>'}
+        </div>
+      </header>
+      <div class="poems-controls">
+        <div class="search-bar poems-search-bar"><i class="fas fa-search"></i><input type="text" id="poem-search" placeholder="Şiir, şair veya mısra ara..." /></div>
+        <div class="poems-filters" role="tablist">
+          <button type="button" class="poems-filter is-active" data-poem-filter="all"><i class="fas fa-infinity"></i> Tümü</button>
+          <button type="button" class="poems-filter" data-poem-filter="liked"><i class="fas fa-heart"></i> En beğenilen</button>
+          <button type="button" class="poems-filter" data-poem-filter="new"><i class="fas fa-clock"></i> En yeni</button>
+          ${currentUser ? '<button type="button" class="poems-filter" data-poem-filter="mine"><i class="fas fa-user-pen"></i> Benimkiler</button>' : ''}
+        </div>
       </div>
-      <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="poem-search" placeholder="Şiir ara..." /></div>
       <div id="poems-list"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
 
@@ -6480,17 +6510,29 @@ async function renderPoemList(app) {
   try {
     poems = await api('/poems');
   } catch {}
-  renderPoemListItems(poems);
-
-  $('#poem-search')?.addEventListener('input', e => {
-    const q = e.target.value.toLowerCase().trim();
-    const filtered = !q ? poems : poems.filter(p => {
-      const hay = ((p.title || '') + ' ' + (p.content || '') + ' ' + (p.username || '')).toLowerCase();
+  let currentFilter = 'all';
+  let currentQuery = '';
+  const applyAll = () => {
+    const q = currentQuery.toLowerCase().trim();
+    let list = !q ? poems.slice() : poems.filter(p => {
+      const hay = ((p.title || '') + ' ' + (p.content || '') + ' ' + (p.username || '') + ' ' + (p.nickname || '')).toLowerCase();
       return hay.includes(q);
     });
-    renderPoemListItems(filtered);
-  });
+    if (currentFilter === 'liked') list.sort((a, b) => (Number(b.like_count || 0) - Number(a.like_count || 0)));
+    else if (currentFilter === 'new') list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    else if (currentFilter === 'mine') list = list.filter(p => currentUser && (Number(p.user_id) === Number(currentUser.id)));
+    renderPoemListItems(list);
+  };
+  applyAll();
 
+  $('#poem-search')?.addEventListener('input', e => { currentQuery = e.target.value; applyAll(); });
+  document.querySelectorAll('.poems-filter').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('.poems-filter').forEach(b => b.classList.remove('is-active'));
+    btn.classList.add('is-active');
+    currentFilter = btn.dataset.poemFilter;
+    applyAll();
+  }));
+  $('#poems-new-btn')?.addEventListener('click', () => showNewPoemModal());
 }
 
 function renderPoemListItems(poems) {
@@ -6504,25 +6546,140 @@ function renderPoemListItems(poems) {
 }
 
 function showNewPoemModal(existing = null) {
+  const draftKey = `cigcig_poem_draft:${currentUser?.id || 'guest'}`;
+  let savedDraft = null;
+  if (!existing) {
+    try { savedDraft = JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch {}
+  }
   showModal(existing ? 'Şiiri Düzenle' : 'Yeni Şiir', `
-    <div class="form-group">
-      <label>Başlık</label>
-      <input id="pm-title" type="text" placeholder="Şiirin başlığı" value="${existing ? escHtml(existing.title) : ''}" />
+    <div class="poem-composer">
+      <div class="poem-composer-toolbar" role="toolbar" aria-label="Şiir biçimlendirme">
+        <button type="button" class="poem-tool" data-wrap="**" title="Kalın (Ctrl+B)"><i class="fas fa-bold"></i></button>
+        <button type="button" class="poem-tool" data-wrap="_" title="İtalik (Ctrl+I)"><i class="fas fa-italic"></i></button>
+        <button type="button" class="poem-tool" data-insert="> " title="Alıntı"><i class="fas fa-quote-left"></i></button>
+        <button type="button" class="poem-tool" data-insert="— " title="Tire"><i class="fas fa-minus"></i></button>
+        <span class="poem-tool-sep"></span>
+        <select class="poem-tool-select" id="pm-font" title="Yazı tipi">
+          <option value="serif">Serif (klasik)</option>
+          <option value="georgia">Georgia</option>
+          <option value="literata">Literata</option>
+          <option value="mono">Daktilo</option>
+        </select>
+        <select class="poem-tool-select" id="pm-align" title="Hizalama">
+          <option value="left">Sola</option>
+          <option value="center">Ortaya</option>
+          <option value="right">Sağa</option>
+        </select>
+        <span class="poem-tool-sep"></span>
+        <button type="button" class="poem-tool poem-tool-preview-toggle" id="pm-preview-toggle" title="Önizleme"><i class="fas fa-eye"></i></button>
+      </div>
+      <div class="form-group">
+        <label>Başlık</label>
+        <input id="pm-title" type="text" placeholder="Şiirin başlığı" maxlength="200" value="${existing ? escHtml(existing.title) : escHtml(savedDraft?.title || '')}" />
+      </div>
+      <div class="form-group">
+        <label>Şiir</label>
+        <div class="poem-editor-wrap">
+          <textarea id="pm-content" class="poem-editor" rows="14" placeholder="Şiirini yaz…\nHer satır ayrı mısra olacak.">${existing ? escHtml(existing.content) : escHtml(savedDraft?.content || '')}</textarea>
+          <div id="pm-preview" class="poem-preview" hidden aria-live="polite"></div>
+        </div>
+        <div class="poem-editor-meta">
+          <span id="pm-char-count">0</span> karakter · <span id="pm-line-count">0</span> satır
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label"><input type="checkbox" id="pm-hidden" ${existing && existing.is_hidden ? 'checked' : ''} /> Sadece ben ve yönetim görebilsin (gizli paylaşım)</label>
+      </div>
+      <div class="poem-composer-actions">
+        <button class="btn btn-primary" id="pm-submit">${existing ? 'Güncelle' : 'Yayınla'}</button>
+        ${existing ? '' : '<button class="btn btn-ghost" id="pm-save-draft" type="button"><i class="fas fa-save"></i> Taslağı kaydet</button>'}
+      </div>
+      <div id="pm-error" class="form-error mt-4"></div>
     </div>
-    <div class="form-group">
-      <label>Şiir</label>
-      <textarea id="pm-content" rows="10" placeholder="Şiirini yaz...">${existing ? escHtml(existing.content) : ''}</textarea>
-    </div>
-    <div class="form-group">
-      <label class="checkbox-label"><input type="checkbox" id="pm-hidden" ${existing && existing.is_hidden ? 'checked' : ''} /> Sadece ben ve yönetim görebilsin (gizli paylaşım)</label>
-    </div>
-    <button class="btn btn-primary" id="pm-submit" style="width:100%">${existing ? 'Güncelle' : 'Yayınla'}</button>
-    <div id="pm-error" class="form-error mt-4"></div>
   `);
 
+  const titleEl = $('#pm-title');
+  const contentEl = $('#pm-content');
+  const previewEl = $('#pm-preview');
+  const charEl = $('#pm-char-count');
+  const lineEl = $('#pm-line-count');
+  const fontSel = $('#pm-font');
+  const alignSel = $('#pm-align');
+
+  const applyStyle = () => {
+    if (contentEl) {
+      contentEl.classList.remove('font-serif', 'font-georgia', 'font-literata', 'font-mono');
+      contentEl.classList.add('font-' + (fontSel?.value || 'serif'));
+      contentEl.style.textAlign = alignSel?.value || 'left';
+    }
+    if (previewEl) {
+      previewEl.classList.remove('font-serif', 'font-georgia', 'font-literata', 'font-mono');
+      previewEl.classList.add('font-' + (fontSel?.value || 'serif'));
+      previewEl.style.textAlign = alignSel?.value || 'left';
+    }
+  };
+  fontSel?.addEventListener('change', applyStyle);
+  alignSel?.addEventListener('change', applyStyle);
+  applyStyle();
+
+  const updateMeta = () => {
+    const text = contentEl?.value || '';
+    if (charEl) charEl.textContent = text.length;
+    if (lineEl) lineEl.textContent = text.split(/\r?\n/).length;
+    if (previewEl && !previewEl.hidden) previewEl.innerHTML = poemTextHTML(text);
+    // Taslağı otomatik kaydet (sadece yeni şiirde)
+    if (!existing) {
+      try { localStorage.setItem(draftKey, JSON.stringify({ title: titleEl?.value || '', content: text, savedAt: Date.now() })); } catch {}
+    }
+  };
+  contentEl?.addEventListener('input', updateMeta);
+  titleEl?.addEventListener('input', updateMeta);
+  updateMeta();
+
+  const wrapSelection = (before, after = before) => {
+    if (!contentEl) return;
+    const start = contentEl.selectionStart;
+    const end = contentEl.selectionEnd;
+    const value = contentEl.value;
+    const selected = value.slice(start, end);
+    contentEl.value = value.slice(0, start) + before + selected + after + value.slice(end);
+    contentEl.focus();
+    contentEl.setSelectionRange(start + before.length, end + before.length);
+    updateMeta();
+  };
+  const insertText = txt => {
+    if (!contentEl) return;
+    const start = contentEl.selectionStart;
+    const value = contentEl.value;
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+    contentEl.value = value.slice(0, lineStart) + txt + value.slice(lineStart);
+    contentEl.focus();
+    contentEl.setSelectionRange(start + txt.length, start + txt.length);
+    updateMeta();
+  };
+  document.querySelectorAll('.poem-tool[data-wrap]').forEach(btn => btn.addEventListener('click', () => wrapSelection(btn.dataset.wrap)));
+  document.querySelectorAll('.poem-tool[data-insert]').forEach(btn => btn.addEventListener('click', () => insertText(btn.dataset.insert)));
+  contentEl?.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); wrapSelection('**'); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') { e.preventDefault(); wrapSelection('_'); }
+  });
+  $('#pm-preview-toggle')?.addEventListener('click', () => {
+    if (!previewEl || !contentEl) return;
+    const showingPreview = !previewEl.hidden;
+    previewEl.hidden = showingPreview;
+    contentEl.hidden = !showingPreview;
+    if (!previewEl.hidden) previewEl.innerHTML = poemTextHTML(contentEl.value);
+  });
+  $('#pm-save-draft')?.addEventListener('click', () => {
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({ title: titleEl?.value || '', content: contentEl?.value || '', savedAt: Date.now() }));
+      toast('Taslak kaydedildi');
+    } catch { toast('Taslak kaydedilemedi', 'error'); }
+  });
+
   $('#pm-submit').addEventListener('click', async () => {
-    const title = $('#pm-title').value.trim();
-    const content = $('#pm-content').value.trim();
+    const title = titleEl.value.trim();
+    const content = contentEl.value.trim();
     if (!title || !content) {
       $('#pm-error').textContent = 'Başlık ve şiir içeriği zorunlu';
       return;
@@ -6535,6 +6692,7 @@ function showNewPoemModal(existing = null) {
         toast('Şiir güncellendi');
       } else {
         const poem = await api('/poems', { method: 'POST', body: JSON.stringify(payload) });
+        try { localStorage.removeItem(draftKey); } catch {}
         toast('Şiir yayınlandı');
         hideModal();
         navigate('/siir/' + poem.slug);
@@ -6544,6 +6702,72 @@ function showNewPoemModal(existing = null) {
       renderRoute(location.pathname);
     } catch (error) {
       $('#pm-error').textContent = error.message;
+    }
+  });
+}
+
+// Şiir paylaş/ilet: bir şiiri DM yoluyla başka bir kullanıcıya gönder.
+async function showPoemForwardModal(poem) {
+  if (!currentUser) { toast('Şiir iletmek için giriş yap.', 'error'); return; }
+  showModal('Şiiri ilet', `
+    <p style="margin:0 0 10px 0;color:var(--text-secondary);font-size:13px">"<b>${escHtml(poem.title)}</b>" şiirini seçtiğin kişiye özel mesaj olarak gönder.</p>
+    <div class="form-group">
+      <label>Kime?</label>
+      <input id="pfwd-user" type="text" placeholder="Kullanıcı adı veya nickname" autocomplete="off" />
+      <div id="pfwd-suggest" class="poem-forward-suggest"></div>
+    </div>
+    <div class="form-group">
+      <label>Not (opsiyonel)</label>
+      <textarea id="pfwd-note" rows="3" placeholder="İletiyle birlikte kısa bir not ekle…" maxlength="500"></textarea>
+    </div>
+    <button class="btn btn-primary" id="pfwd-send" style="width:100%" disabled><i class="fas fa-paper-plane"></i> Gönder</button>
+    <div id="pfwd-error" class="form-error mt-4"></div>
+  `);
+  const input = $('#pfwd-user');
+  const suggestEl = $('#pfwd-suggest');
+  const sendBtn = $('#pfwd-send');
+  let chosen = null;
+  const setChosen = u => {
+    chosen = u;
+    if (sendBtn) sendBtn.disabled = !u;
+    if (u && input) input.value = u.nickname ? `${u.nickname} (@${u.username})` : `@${u.username}`;
+    if (suggestEl) suggestEl.innerHTML = '';
+  };
+  let searchTimer;
+  input?.addEventListener('input', () => {
+    chosen = null;
+    sendBtn.disabled = true;
+    clearTimeout(searchTimer);
+    const q = input.value.trim().replace(/^@/, '');
+    if (q.length < 2) { suggestEl.innerHTML = ''; return; }
+    searchTimer = setTimeout(async () => {
+      try {
+        const users = await api('/search/users?q=' + encodeURIComponent(q));
+        suggestEl.innerHTML = (users || []).slice(0, 6).map(u => `
+          <button type="button" class="poem-forward-row" data-username="${escHtml(u.username)}">
+            ${hasUsableAvatar(u) ? `<img src="${escHtml(u.avatar)}" alt="" />` : '<span class="poem-forward-row-ph"><i class="fas fa-user"></i></span>'}
+            <span><strong>${escHtml(u.nickname || u.username)}</strong><small>@${escHtml(u.username)}</small></span>
+          </button>`).join('');
+        suggestEl.querySelectorAll('.poem-forward-row').forEach(btn => btn.addEventListener('click', () => {
+          const chosenU = users.find(u => u.username === btn.dataset.username);
+          if (chosenU) setChosen(chosenU);
+        }));
+      } catch (e) { suggestEl.innerHTML = `<div class="poem-forward-err">${escHtml(e.message || 'Arama başarısız')}</div>`; }
+    }, 250);
+  });
+  sendBtn?.addEventListener('click', async () => {
+    if (!chosen) return;
+    sendBtn.disabled = true;
+    const note = ($('#pfwd-note')?.value || '').trim();
+    const link = `${location.origin}/siir/${encodeURIComponent(poem.slug)}`;
+    const content = (note ? note + '\n\n' : '') + `📜 Şiir: ${poem.title}\n${link}`;
+    try {
+      await api(`/conversation/${encodeURIComponent(chosen.username)}/messages`, { method: 'POST', body: JSON.stringify({ content }) });
+      toast('Şiir iletildi');
+      hideModal();
+    } catch (e) {
+      $('#pfwd-error').textContent = e.message;
+      sendBtn.disabled = false;
     }
   });
 }
@@ -6596,6 +6820,7 @@ async function renderPoemDetail(app, slug) {
           <i class="${liked ? 'fas' : 'far'} fa-heart"></i> <span id="poem-like-count">${formatCount(poem.like_count)}</span> Beğeni
         </button>
         <button class="forum-action-btn" id="poem-share-btn"><i class="fas fa-share-alt"></i> Paylaş</button>
+        ${currentUser ? '<button class="forum-action-btn" id="poem-forward-btn"><i class="fas fa-paper-plane"></i> İlet</button>' : ''}
       </div>
       <hr class="divider" />
        <div class="comments-section">
@@ -6660,6 +6885,7 @@ async function renderPoemDetail(app, slug) {
     if (navigator.clipboard) { navigator.clipboard.writeText(url); toast('Link kopyalandı!'); }
     else { await CigCigDialogs.prompt('Bağlantıyı kopyalamak için seçin.', url, { title: 'Paylaşım bağlantısı', readOnly: true, selectOnOpen: true, acceptText: 'Kapat' }); }
   });
+  $('#poem-forward-btn')?.addEventListener('click', () => showPoemForwardModal(poem));
 
   let commentReplyTarget = null;
   const clearCommentReply = () => {
@@ -11841,6 +12067,10 @@ async function renderProfile(app, username) {
       }
     } catch {}
   }
+  // Reals tamamen kapalıysa profilde reals sekmesi hiç olmasın (verisi sunucuda duruyor, geri gelince görünür).
+  if (window.__realsFullyDisabled || data.reals_fully_disabled) {
+    profileTabOrder = profileTabOrder.filter(tab => tab !== 'reals');
+  }
   let profileVisibility = { forums: true, books: true, comments: true, photos: true, music: true };
   try { profileVisibility = { ...profileVisibility, ...(user.profile_visibility ? JSON.parse(user.profile_visibility) : {}) }; } catch {}
   let followState = { following: !!data.following, pending: false };
@@ -15223,6 +15453,14 @@ async function init() {
     clearTimeout(settingsTimeout);
   }
   startAppVersionPolling();
+  // Reals tamamen kapalıysa tüm nav/menü girişlerini gizle (veri silinmez; açılınca geri gelir).
+  try {
+    const rs = await api('/reals-settings');
+    window.__realsFullyDisabled = !!rs.fullyDisabled;
+    document.body.classList.toggle('reals-fully-disabled', !!rs.fullyDisabled);
+  } catch (error) {
+    console.warn('Reals ayarları yüklenemedi:', error.message);
+  }
   if (!canRenderBeforeSettings) {
     renderRoute(location.pathname + location.search);
   }
@@ -17502,7 +17740,20 @@ async function renderDMChat(username) {
 
   // Auto-resize textarea
   const textareaEl = document.getElementById('dm-input');
+  // WhatsApp tarzı taslak: yazılan ama gönderilmemiş mesajı sohbet başına göre sakla, geri gelince aynen getir.
+  const dmDraftKey = `cigcig_dm_draft:${currentUser?.id || 'guest'}:${username}`;
   if (textareaEl) {
+    try {
+      const savedDraft = localStorage.getItem(dmDraftKey);
+      if (savedDraft) {
+        textareaEl.value = savedDraft;
+        requestAnimationFrame(() => {
+          textareaEl.style.height = 'auto';
+          textareaEl.style.height = Math.min(textareaEl.scrollHeight, 132) + 'px';
+          window.__dmSyncComposerMode?.();
+        });
+      }
+    } catch {}
     textareaEl.addEventListener('paste', event => {
       const files = Array.from(event.clipboardData?.items || [])
         .filter(item => item.type.startsWith('image/'))
@@ -17518,6 +17769,11 @@ async function renderDMChat(username) {
       textareaEl.style.height = 'auto';
       textareaEl.style.height = Math.min(textareaEl.scrollHeight, 132) + 'px';
       window.__dmSyncComposerMode?.();
+      // Her tuşta taslağı yerelde güncelle (WhatsApp gibi); sohbetten çıkıp dönünce aynen kalır.
+      try {
+        if (textareaEl.value) localStorage.setItem(dmDraftKey, textareaEl.value);
+        else localStorage.removeItem(dmDraftKey);
+      } catch {}
       if (dmTypingTimer) clearTimeout(dmTypingTimer);
       const conversationId = document.querySelector('.dm-chat')?.dataset.conversationId;
       if (textareaEl.value.trim() && conversationId && !isSelfConversation) {
@@ -17533,6 +17789,8 @@ async function renderDMChat(username) {
       }
     });
   }
+  // Mesaj gönderildiğinde taslak temizlensin; bu alan sendDmMessage içinden de erişilebilsin
+  window.__dmCurrentDraftKey = dmDraftKey;
 
   // Send message
   let dmSendInFlight = false;
@@ -17568,6 +17826,8 @@ async function renderDMChat(username) {
       window.__dmClearImg();
       if (uploadStatus) uploadStatus.textContent = '';
       if (inputEl) { inputEl.value = ''; inputEl.style.height = 'auto'; }
+      // Taslağı da temizle: mesaj gitti, taslak gerekmez.
+      try { if (window.__dmCurrentDraftKey) localStorage.removeItem(window.__dmCurrentDraftKey); } catch {}
       window.__dmSyncComposerMode?.();
       window.__dmClearReply?.();
       const el = document.getElementById('dm-messages');

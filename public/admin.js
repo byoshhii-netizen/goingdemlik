@@ -6100,6 +6100,9 @@ async function renderSettings(main) {
           <div class="adm-feature-copy"><strong>Reals bakım modu</strong><p>Açıldığında Reals akışı ve yeni Reals paylaşımları durdurulur. Ziyaretçiler için gösterilecek duyuruyu aşağıdan değiştirebilirsiniz.</p></div>
           <label class="adm-toggle-row" for="s-reals-maintenance-enabled"><span><i class="fas fa-screwdriver-wrench"></i> Reals bakım modunu etkinleştir</span><span class="adm-toggle"><input type="checkbox" id="s-reals-maintenance-enabled" ${settings['reals_maintenance_enabled'] === '1' ? 'checked' : ''}><span></span></span></label>
           <div class="form-group"><label>Bakım duyurusu (en fazla 400 karakter)</label><textarea id="s-reals-maintenance-message" rows="3" maxlength="400">${escHtml(settings['reals_maintenance_message'] || 'Reals şu anda bakımda. En iyi hizmeti verebilmek için baştan tasarlıyoruz.')}</textarea></div>
+          <div class="adm-feature-copy"><strong>Reals tamamen kapat</strong><p>Açıldığında Reals özelliği site üzerindeki hiçbir yerde görünmez: üst menü, profil sekmesi, oluştur menüsü ve mobil alt barda Reals bağlantıları gizlenir. Kullanıcıların mevcut Reals verileri <u>silinmez</u>; sunucuda saklanır. Kapatma işareti kaldırıldığında her şey tekrar yerine gelir.</p></div>
+          <label class="adm-toggle-row" for="s-reals-fully-disabled"><span><i class="fas fa-circle-pause"></i> Reals'ı tamamen kapat</span><span class="adm-toggle"><input type="checkbox" id="s-reals-fully-disabled" ${settings['reals_fully_disabled'] === '1' ? 'checked' : ''}><span></span></span></label>
+          <div class="form-group"><label>Kapalıyken gösterilecek mesaj</label><textarea id="s-reals-disabled-message" rows="2" maxlength="400">${escHtml(settings['reals_disabled_message'] || 'Reals özelliği şu anda kapalı.')}</textarea></div>
           <div class="adm-feature-copy"><strong>Reals bilgi düğmesi</strong><p>Açıksa soru işareti, her kullanıcının Reals sayfasına ilk girişinde bir kez görünür. Kapalıysa hiç gösterilmez.</p></div>
           <label class="adm-toggle-row" for="s-reals-info-enabled"><span><i class="fas fa-circle-question"></i> İlk Reals ziyaretinde göster</span><span class="adm-toggle"><input type="checkbox" id="s-reals-info-enabled" ${settings['reals_info_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
           <div class="form-group"><label>Reals ilk hatırlatma metni (kısa)</label><textarea id="s-reals-reminder" rows="3">${escHtml(settings['reals_reminder']||'')}</textarea></div>
@@ -6574,6 +6577,8 @@ async function renderSettings(main) {
     if (!await saveSetting('reals_info_enabled', document.getElementById('s-reals-info-enabled').checked ? '1' : '0', msg, false)) return;
     if (!await saveSetting('reals_maintenance_enabled', document.getElementById('s-reals-maintenance-enabled').checked ? '1' : '0', msg, false)) return;
     if (!await saveSetting('reals_in_media_enabled', document.getElementById('s-reals-in-media-enabled').checked ? '1' : '0', msg, false)) return;
+    if (!await saveSetting('reals_fully_disabled', document.getElementById('s-reals-fully-disabled').checked ? '1' : '0', msg, false)) return;
+    if (!await saveSetting('reals_disabled_message', document.getElementById('s-reals-disabled-message').value.trim(), msg, false)) return;
     toast('Reals ayarları kaydedildi');
     msg.style.color='var(--green)'; msg.textContent='✓ Reals ayarları kaydedildi';
   });

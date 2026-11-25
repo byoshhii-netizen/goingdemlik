@@ -1,0 +1,633 @@
+/* =======================================================================
+ * CigCig Upgrade — kapsayıcı iyileştirme katmanı
+ *   • Reals tamamen kapatma: body.reals-fully-disabled ile tüm Reals linkleri
+ *     ve profildeki Reals sekmesi gizlenir (veri silinmez, sunucuda kalır;
+ *     açılınca her şey yerine döner).
+ *   • GIF bulanıklığı: resim ölçekleme kalitesi + büyütmede boyut sınırı.
+ *   • Mesaj gösterimi: satır sonları korunur (WhatsApp/Instagram gibi).
+ *   • Instagram tarzı Reals yorum sheet görünümü.
+ *   • YouTube tarzı video sayfası ve video detay görünümü.
+ *   • Yeniden tasarlanmış Şiirler sayfası, şiir yazma menüsü ve "şiir ilet"
+ *     modalı. Mobil uyumlu.
+ * =======================================================================*/
+
+/* ------------------------------------------------------------------
+ * 1) REALS — TAMAMEN KAPATMA
+ * ------------------------------------------------------------------ */
+body.reals-fully-disabled a[href="/reals"],
+body.reals-fully-disabled a[href^="/reals/"],
+body.reals-fully-disabled #nav-new-reals,
+body.reals-fully-disabled #mob-new-reals,
+body.reals-fully-disabled #mbb-reals,
+body.reals-fully-disabled [data-tab="reals"],
+body.reals-fully-disabled #tab-reals,
+body.reals-fully-disabled .reals-shortcut,
+body.reals-fully-disabled .realslink,
+body.reals-fully-disabled [data-reals-nav] { display: none !important; }
+
+/* Kapalı ekranı için küçük görsel farklılık */
+.reals-fully-disabled-shell .reals-maintenance-icon {
+  background: linear-gradient(135deg, rgba(100,100,100,.35), rgba(60,60,60,.45));
+}
+.reals-fully-disabled-shell .reals-maintenance-eyebrow { color: #a3a3a3; }
+
+/* ------------------------------------------------------------------
+ * 2) GIF BULANIKLIĞI DÜZELTME
+ *    - image-rendering: auto (tarayıcının en iyi filtresi)
+ *    - Küçük GIF'ler üzerine büyültüldüğünde yumuşak kalır, ama absürt
+ *      boyutta esnemez.
+ * ------------------------------------------------------------------ */
+.dm-shared-gif,
+.gif-picker img,
+img.gif,
+img[src*=".gif"] {
+  image-rendering: auto !important;
+  -ms-interpolation-mode: bicubic;
+  transform: translateZ(0);     /* GPU'ya al, keskin kalsın */
+  backface-visibility: hidden;
+  will-change: transform;
+}
+.dm-shared-gif {
+  /* Çok fazla büyültme bulanıklığa yol açar; doğal boyutu aşma */
+  max-width: min(260px, 100%) !important;
+  max-height: 260px !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain;
+  background: transparent;
+  border-radius: 12px;
+}
+
+/* ------------------------------------------------------------------
+ * 3) MESAJLARDA SATIR SONLARI (ek güvence)
+ *    JS tarafında <br> çevrimine ek olarak, kalan ham metin node'u da
+ *    olursa diye white-space: pre-wrap uygulanır.
+ * ------------------------------------------------------------------ */
+.dm-msg-content,
+.dm-msg-content span,
+.dm-msg-text,
+.chat-msg-text,
+.comment-text,
+.comment-body,
+.reels-comment-text {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+/* Input alanı için de aynı: taslak metni doğru görünsün */
+#dm-input, #chat-input, #comment-input, #reels-comment-input {
+  white-space: pre-wrap;
+}
+
+/* ------------------------------------------------------------------
+ * 4) INSTAGRAM TARZI REALS YORUM SHEET'İ
+ * ------------------------------------------------------------------ */
+.ig-reels-comments-sheet,
+#reals-comments-sheet,
+.reals-comments-modal {
+  position: fixed !important;
+  left: 0; right: 0; bottom: 0;
+  background: rgba(20,20,20,.98);
+  color: #fff;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  max-height: 75vh;
+  min-height: 42vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 9000;
+  box-shadow: 0 -14px 48px rgba(0,0,0,.55);
+  animation: igCommentsUp .28s cubic-bezier(.2,.9,.3,1.1);
+  backdrop-filter: blur(6px);
+}
+@keyframes igCommentsUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.ig-reels-comments-sheet header,
+.ig-reels-comments-sheet .ig-comments-header,
+#reals-comments-sheet .comments-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid rgba(255,255,255,.10);
+  position: relative;
+}
+.ig-reels-comments-sheet header::before,
+#reals-comments-sheet .comments-header::before {
+  content: '';
+  position: absolute;
+  top: 6px; left: 50%; transform: translateX(-50%);
+  width: 38px; height: 4px; border-radius: 3px;
+  background: rgba(255,255,255,.28);
+}
+.ig-reels-comments-sheet h3,
+#reals-comments-sheet .comments-title {
+  font-size: 15px; font-weight: 700; color: #fff; margin: 4px 0 0;
+}
+.ig-reels-comments-sheet .ig-comments-list,
+#reals-comments-sheet .comments-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px 80px;
+}
+.ig-reels-comment {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  gap: 10px;
+  padding: 8px 0;
+  align-items: start;
+}
+.ig-reels-comment img.avatar, .ig-reels-comment .avatar-sm {
+  width: 34px !important; height: 34px !important; border-radius: 50%;
+  object-fit: cover; grid-row: span 2;
+}
+.ig-reels-comment .ig-reels-comment-body {
+  color: #f1f1f1;
+  font-size: 13px;
+  line-height: 1.42;
+  word-break: break-word;
+}
+.ig-reels-comment .ig-reels-comment-body b {
+  color: #fff;
+  font-weight: 650;
+  margin-right: 4px;
+}
+.ig-reels-comment .ig-reels-comment-meta {
+  display: flex; gap: 14px; align-items: center;
+  color: #a6a6a6; font-size: 11.5px; margin-top: 3px;
+}
+.ig-reels-comment .ig-reels-comment-meta button {
+  background: none; border: 0; color: inherit; cursor: pointer;
+  font-weight: 600; letter-spacing: .3px; padding: 0;
+}
+.ig-reels-comment-like {
+  background: none; border: 0; color: #d8d8d8; cursor: pointer;
+  font-size: 16px; padding: 2px; align-self: start;
+}
+.ig-reels-comment-like.is-liked { color: #ff3b53; }
+.ig-reels-comments-input {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px 14px;
+  border-top: 1px solid rgba(255,255,255,.08);
+  background: rgba(10,10,10,.92);
+}
+.ig-reels-comments-input input,
+.ig-reels-comments-input textarea {
+  flex: 1;
+  background: transparent;
+  color: #fff;
+  border: 0;
+  outline: 0;
+  padding: 9px 2px;
+  font-size: 14px;
+  resize: none;
+}
+.ig-reels-comments-input button.send {
+  background: none; border: 0;
+  color: #ff3b53;
+  font-weight: 700; font-size: 13px;
+  padding: 6px 6px; cursor: pointer;
+  opacity: .5;
+}
+.ig-reels-comments-input button.send.active { opacity: 1; }
+.ig-reels-emoji-row {
+  display: flex; gap: 6px; padding: 4px 12px 0; overflow-x: auto;
+}
+.ig-reels-emoji-row button {
+  background: none; border: 0; font-size: 20px;
+  padding: 4px 6px; cursor: pointer;
+}
+@media (max-width: 420px) {
+  .ig-reels-comments-sheet, #reals-comments-sheet { max-height: 85vh; }
+}
+
+/* ------------------------------------------------------------------
+ * 5) YOUTUBE TARZI VİDEO LİSTESİ VE DETAY
+ * ------------------------------------------------------------------ */
+/* Video liste ızgarası — YT anasayfası gibi */
+.yt-video-grid, .video-list-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 18px 14px;
+  padding: 10px 2px;
+}
+.yt-video-card, .video-card.yt-style {
+  display: flex; flex-direction: column;
+  background: transparent;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform .18s ease;
+}
+.yt-video-card:hover { transform: translateY(-2px); }
+.yt-video-thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16/9;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0a0a0a;
+}
+.yt-video-thumb img {
+  width: 100%; height: 100%; object-fit: cover;
+  display: block;
+}
+.yt-video-duration {
+  position: absolute;
+  right: 6px; bottom: 6px;
+  background: rgba(0,0,0,.85);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.yt-video-info {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 10px;
+  padding: 10px 4px;
+}
+.yt-video-info .yt-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  object-fit: cover;
+}
+.yt-video-info h3 {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text-primary);
+  margin: 0 0 4px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.yt-video-info .yt-video-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.yt-video-info .yt-video-meta b { font-weight: 500; color: var(--text-secondary); }
+
+/* Video detay: büyük oynatıcı + sağda ilgili videolar (YT'nin "watch" düzeni) */
+.yt-watch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 20px;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 14px 14px 60px;
+}
+.yt-watch .yt-watch-primary { min-width: 0; }
+.yt-watch .yt-watch-secondary { min-width: 0; }
+.yt-player-shell {
+  width: 100%;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+}
+.yt-player-shell video {
+  width: 100%; height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #000;
+}
+.yt-video-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 12px 0 4px;
+  line-height: 1.3;
+}
+.yt-video-stats {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+.yt-actions {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin: 12px 0 10px;
+}
+.yt-actions .yt-action {
+  background: rgba(127,127,127,.14);
+  color: var(--text-primary);
+  border: 0;
+  padding: 8px 14px;
+  border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer;
+}
+.yt-actions .yt-action:hover { background: rgba(127,127,127,.22); }
+.yt-actions .yt-action.liked { color: #2563eb; }
+.yt-channel-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.yt-channel-row img.avatar {
+  width: 44px; height: 44px; border-radius: 50%; object-fit: cover;
+}
+.yt-channel-row .yt-channel-info { flex: 1; min-width: 0; }
+.yt-channel-row .yt-channel-info b { display: block; font-weight: 650; color: var(--text-primary); }
+.yt-channel-row .yt-channel-info small { color: var(--text-muted); font-size: 12px; }
+.yt-description-box {
+  background: rgba(127,127,127,.09);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin: 12px 0 18px;
+  color: var(--text-primary);
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.yt-watch-secondary .yt-related-item {
+  display: grid;
+  grid-template-columns: 168px 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  border-radius: 10px;
+  padding: 4px;
+  transition: background .15s;
+}
+.yt-watch-secondary .yt-related-item:hover { background: rgba(127,127,127,.09); }
+.yt-watch-secondary .yt-related-thumb {
+  width: 168px; aspect-ratio: 16/9;
+  border-radius: 8px; overflow: hidden; background: #000;
+}
+.yt-watch-secondary .yt-related-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.yt-watch-secondary .yt-related-info b {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  font-size: 13.5px; font-weight: 600; color: var(--text-primary); line-height: 1.3;
+}
+.yt-watch-secondary .yt-related-info small {
+  display: block; color: var(--text-muted); font-size: 12px; margin-top: 4px;
+}
+
+@media (max-width: 1100px) {
+  .yt-watch { grid-template-columns: 1fr; }
+  .yt-watch-secondary .yt-related-item { grid-template-columns: 140px 1fr; }
+  .yt-watch-secondary .yt-related-thumb { width: 140px; }
+}
+@media (max-width: 640px) {
+  .yt-video-info h3 { font-size: 13.5px; }
+  .yt-video-title { font-size: 16.5px; }
+  .yt-watch { padding: 10px 8px 40px; }
+}
+
+/* ------------------------------------------------------------------
+ * 6) ŞİİRLER — SAYFA, EDİTÖR VE İLET MODALI
+ * ------------------------------------------------------------------ */
+.poems-page { max-width: 980px; }
+.poems-hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: center;
+  padding: 26px 22px;
+  margin: 10px 0 18px;
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(255,80,110,.18), transparent 55%),
+    radial-gradient(circle at 85% 90%, rgba(60,80,255,.12), transparent 60%),
+    linear-gradient(135deg, rgba(40,20,40,.65), rgba(20,20,35,.75));
+  color: #fff;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.08);
+}
+.poems-hero::before {
+  content: '"';
+  position: absolute;
+  top: -60px; right: -10px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 300px;
+  color: rgba(255,255,255,.04);
+  line-height: 1;
+}
+.poems-hero-eyebrow {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: #ffb3c2;
+  letter-spacing: 1.5px;
+  font-size: 11px; font-weight: 700;
+  margin-bottom: 8px;
+}
+.poems-hero-title {
+  font-family: Georgia, 'Playfair Display', 'Literata', serif;
+  font-size: 34px;
+  font-weight: 700;
+  margin: 0 0 6px;
+  letter-spacing: .5px;
+}
+.poems-hero-sub {
+  color: rgba(255,255,255,.75);
+  margin: 0;
+  font-size: 14px;
+  max-width: 520px;
+}
+.poems-hero-actions .btn { font-weight: 650; }
+.poems-controls {
+  display: flex; flex-wrap: wrap; gap: 12px;
+  align-items: center; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.poems-search-bar { flex: 1 1 260px; min-width: 220px; }
+.poems-filters {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.poems-filter {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 8px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 13px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.poems-filter.is-active {
+  background: var(--accent-red2, #e11d48);
+  color: #fff;
+  border-color: transparent;
+}
+
+/* Şiir kartı — daha "kitap" hissi */
+.poem-card {
+  background: linear-gradient(180deg, var(--bg-card), var(--bg-secondary));
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  cursor: pointer;
+  transition: transform .18s, box-shadow .18s, border-color .18s;
+  display: flex; flex-direction: column;
+  min-height: 190px;
+  position: relative;
+}
+.poem-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(0,0,0,.18);
+  border-color: rgba(var(--accent-rgb, 225,29,72), .25);
+}
+.poem-card-title {
+  font-family: Georgia, 'Literata', 'Playfair Display', serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 8px 0 8px;
+  line-height: 1.3;
+}
+.poem-card-preview {
+  font-family: Georgia, 'Literata', serif;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.poem-card-meta {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.poem-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+/* Şiir detayı tipografisi */
+.poem-detail-content {
+  font-family: Georgia, 'Literata', serif;
+  font-size: 18px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  color: var(--text-primary);
+}
+.poem-detail-title {
+  font-family: Georgia, 'Playfair Display', serif;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+/* Şiir yazma modalı */
+.poem-composer { display: grid; gap: 12px; }
+.poem-composer-toolbar {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+}
+.poem-composer-toolbar .poem-tool {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.poem-composer-toolbar .poem-tool:hover {
+  background: rgba(127,127,127,.12);
+  color: var(--text-primary);
+}
+.poem-tool-sep { width: 1px; height: 22px; background: var(--border); margin: 0 3px; }
+.poem-tool-select {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.poem-editor-wrap { position: relative; }
+.poem-editor {
+  width: 100%;
+  min-height: 260px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: Georgia, 'Literata', serif;
+  font-size: 15px;
+  line-height: 1.7;
+  resize: vertical;
+}
+.poem-editor.font-serif { font-family: Georgia, 'Literata', serif; }
+.poem-editor.font-georgia { font-family: Georgia, 'Times New Roman', serif; }
+.poem-editor.font-literata { font-family: 'Literata', Georgia, serif; }
+.poem-editor.font-mono { font-family: 'Courier New', monospace; }
+.poem-preview {
+  min-height: 260px;
+  padding: 18px 22px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: Georgia, 'Literata', serif;
+  font-size: 16px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+.poem-preview.font-serif { font-family: Georgia, 'Literata', serif; }
+.poem-preview.font-georgia { font-family: Georgia, 'Times New Roman', serif; }
+.poem-preview.font-literata { font-family: 'Literata', Georgia, serif; }
+.poem-preview.font-mono { font-family: 'Courier New', monospace; }
+.poem-editor-meta {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  margin-top: 6px;
+}
+.poem-composer-actions {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+
+/* Şiir ilet modalı */
+.poem-forward-suggest { display: grid; gap: 4px; margin-top: 6px; }
+.poem-forward-row {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+.poem-forward-row:hover { background: rgba(127,127,127,.09); }
+.poem-forward-row img {
+  width: 34px; height: 34px; border-radius: 50%; object-fit: cover;
+}
+.poem-forward-row-ph {
+  width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--bg-secondary); color: var(--text-muted);
+}
+.poem-forward-row strong { font-weight: 650; font-size: 13.5px; }
+.poem-forward-row small { color: var(--text-muted); font-size: 12px; display: block; }
+.poem-forward-err { color: #e74c3c; font-size: 12.5px; padding: 6px; }
+
+/* Mobil */
+@media (max-width: 720px) {
+  .poems-hero { grid-template-columns: 1fr; text-align: left; padding: 20px 16px; }
+  .poems-hero-title { font-size: 26px; }
+  .poems-hero-sub { font-size: 13px; }
+  .poem-composer-toolbar { padding: 6px 8px; }
+  .poem-composer-toolbar .poem-tool { padding: 6px 8px; font-size: 12px; }
+  .poem-tool-select { font-size: 12px; }
+  .poem-editor, .poem-preview { font-size: 14.5px; padding: 14px; min-height: 220px; }
+  .poem-grid { grid-template-columns: 1fr; }
+  .poem-detail-content { font-size: 16px; }
+  .poem-detail-title { font-size: 22px; }
+}

@@ -362,6 +362,21 @@ if (process.env.CLOUDINARY_URL) {
 }
 
 const USE_CLOUDINARY = !!(process.env.CLOUDINARY_URL || process.env.CLOUDINARY_CLOUD_NAME);
+
+// ===== MEDYA CDN (MEB vb. erisim engeli cozumu) =====
+// Cloudinary iceriklerini kendi alan adimizdan servis etmek icin. MEDIA_CDN_HOST
+// ayarlanmazsa hicbir sey degismez (res.cloudinary.com oldugu gibi kalir).
+// Worker/nginx: https://<MEDIA_CDN_HOST>/<cloud>/...  ->  https://res.cloudinary.com/<cloud>/...
+const MEDIA_CDN_HOST = String(process.env.MEDIA_CDN_HOST || '')
+  .trim()
+  .replace(/^https?:\/\//i, '')
+  .replace(/\/+$/, '')
+  .toLowerCase();
+function toMediaCdn(url) {
+  if (!MEDIA_CDN_HOST) return url;
+  if (typeof url !== 'string' || !url) return url;
+  return url.replace(/^https:\/\/res\.cloudinary\.com\//i, `https://${MEDIA_CDN_HOST}/`);
+}
 const USE_R2 = !!(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET_NAME);
 const R2_ENDPOINT = process.env.R2_ENDPOINT || `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
 const r2Client = USE_R2 ? new S3Client({
@@ -967,23 +982,31 @@ function boolValue(value) {
 }
 
 const DEFAULT_REALS_MAINTENANCE_MESSAGE = 'Reals şu anda bakımda. En iyi hizmeti verebilmek için baştan tasarlıyoruz.';
+const DEFAULT_REALS_DISABLED_MESSAGE = 'Reals özelliği şu anda kapalı.';
 
 async function getRealsMaintenanceSettings() {
   const { rows } = await query(
     "SELECT key,value FROM settings WHERE key = ANY($1::text[])",
-    [['reals_maintenance_enabled', 'reals_maintenance_message']]
+    [['reals_maintenance_enabled', 'reals_maintenance_message', 'reals_fully_disabled', 'reals_disabled_message']]
   );
   const settings = Object.fromEntries(rows.map(row => [row.key, row.value]));
+  // Tamamen kapatma bakımdan baskındır; verileri silmez, sadece erişimi engeller.
+  const fullyDisabled = settings.reals_fully_disabled === '1';
   return {
-    enabled: settings.reals_maintenance_enabled === '1',
-    message: settings.reals_maintenance_message || DEFAULT_REALS_MAINTENANCE_MESSAGE
+    enabled: fullyDisabled || settings.reals_maintenance_enabled === '1',
+    fullyDisabled,
+    message: fullyDisabled
+      ? (settings.reals_disabled_message || DEFAULT_REALS_DISABLED_MESSAGE)
+      : (settings.reals_maintenance_message || DEFAULT_REALS_MAINTENANCE_MESSAGE),
+    code: fullyDisabled ? 'REALS_DISABLED' : 'REALS_MAINTENANCE'
   };
 }
 
 function denyRealsDuringMaintenance(res, settings) {
   return res.status(503).json({
     error: settings.message,
-    code: 'REALS_MAINTENANCE'
+    code: settings.code || 'REALS_MAINTENANCE',
+    fullyDisabled: !!settings.fullyDisabled
   });
 }
 
@@ -1876,7 +1899,7 @@ async function handleUpload(file) {
         });
         if (!result?.secure_url) throw new Error('Cloudinary URL alınamadı');
         file.cloudinary_public_id = result.public_id || '';
-        return result.secure_url;
+        return toMediaCdn(result.secure_url);
       } finally {
         fs.promises.unlink(file.path).catch(() => {});
       }
@@ -1897,7 +1920,7 @@ async function handleUpload(file) {
           if (err) return reject(new Error('Cloudinary yükleme hatası: ' + (err.message || JSON.stringify(err))));
           if (!result?.secure_url) return reject(new Error('Cloudinary URL alınamadı'));
           file.cloudinary_public_id = result.public_id || '';
-          resolve(result.secure_url);
+          resolve(toMediaCdn(result.secure_url));
         }
       );
       stream.end(file.buffer);
@@ -1924,7 +1947,8 @@ function getCloudinaryAssetDetails(asset) {
   } catch {
     return null;
   }
-  if (!/(^|\.)cloudinary\.com$/i.test(url.hostname)) return null;
+  if (!/(^|\.)cloudinary\.com$/i.test(url.hostname)
+      && !(MEDIA_CDN_HOST && url.hostname.toLowerCase() === MEDIA_CDN_HOST)) return null;
 
   const segments = url.pathname.split('/').filter(Boolean);
   const uploadIndex = segments.indexOf('upload');
@@ -1992,7 +2016,7 @@ async function handleVmbUpload(file) {
         (err, result) => {
           if (err) return reject(new Error('Cloudinary yükleme hatası: ' + (err.message || JSON.stringify(err))));
           if (!result?.secure_url) return reject(new Error('Cloudinary URL alınamadı'));
-          resolve(result.secure_url);
+          resolve(toMediaCdn(result.secure_url));
         }
       );
       stream.end(file.buffer);
@@ -2026,7 +2050,7 @@ async function handleLargeVideoUpload(file) {
       chunk_size: 20 * 1024 * 1024
     });
     if (!result?.secure_url) throw new Error('Cloudinary URL alinamadi');
-    return result.secure_url;
+    return toMediaCdn(result.secure_url);
   } finally {
     fs.promises.unlink(file.path).catch(() => {});
   }
@@ -6673,7 +6697,13 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     reals: Number(contentCounts.reals_count || 0),
     songs: Number(contentCounts.song_count || 0)
   } : undefined;
-  res.json({ user: sanitizeUserForFeatures(user, features), badges, forums, books, groups, photos, videos, reals, songs, avatar_photos: avatarPhotos, content_count, content_breakdown, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, blocked_relationship: blockedRelationship, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length), ...relationshipState });
+  // Reals tamamen kapalıysa profilde reals sekmesi ve verisi hiç görünmesin — veri silinmez, yalnız gizlenir.
+  const realsStateForProfile = await getRealsMaintenanceSettings();
+  const profileReals = realsStateForProfile.fullyDisabled ? [] : reals;
+  const profileBreakdown = content_breakdown && realsStateForProfile.fullyDisabled
+    ? { ...content_breakdown, reals: 0 }
+    : content_breakdown;
+  res.json({ user: sanitizeUserForFeatures(user, features), badges, forums, books, groups, photos, videos, reals: profileReals, songs, avatar_photos: avatarPhotos, content_count, content_breakdown: profileBreakdown, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, blocked_relationship: blockedRelationship, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length), reals_fully_disabled: realsStateForProfile.fullyDisabled, ...relationshipState });
 });
 
 app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {
@@ -10651,7 +10681,7 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { key } = req.body;
   let { value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
-  if (['level_system_enabled', 'badge_system_enabled', 'beta_mode_enabled', 'other_songs_enabled', 'reals_maintenance_enabled', 'reals_in_media_enabled', 'mobile_home_auth_required'].includes(key)) {
+  if (['level_system_enabled', 'badge_system_enabled', 'beta_mode_enabled', 'other_songs_enabled', 'reals_maintenance_enabled', 'reals_in_media_enabled', 'mobile_home_auth_required', 'reals_fully_disabled'].includes(key)) {
     if (!['0', '1', 0, 1, true, false].includes(value)) {
       return res.status(400).json({ error: 'Özellik durumu 0 veya 1 olmalı' });
     }
@@ -14412,6 +14442,7 @@ app.get('/api/download-image', authMiddleware, async (req, res) => {
 
   const allowedHosts = new Set();
   if (process.env.CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_URL) allowedHosts.add('res.cloudinary.com');
+  if (MEDIA_CDN_HOST) allowedHosts.add(MEDIA_CDN_HOST);
   [process.env.R2_PUBLIC_URL, R2_ENDPOINT, SITE_URL].forEach(value => {
     if (!value) return;
     try { allowedHosts.add(new URL(value).hostname); } catch { /* yoksay */ }
@@ -16720,14 +16751,18 @@ app.get('/api/reals', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/reals-settings', async (req, res) => {
-  const { rows } = await query("SELECT key,value FROM settings WHERE key = ANY($1)", [['reals_reminder', 'reals_info_enabled', 'reals_maintenance_enabled', 'reals_maintenance_message', 'reals_in_media_enabled']]);
+  const { rows } = await query("SELECT key,value FROM settings WHERE key = ANY($1)", [['reals_reminder', 'reals_info_enabled', 'reals_maintenance_enabled', 'reals_maintenance_message', 'reals_in_media_enabled', 'reals_fully_disabled', 'reals_disabled_message']]);
   const settings = Object.fromEntries(rows.map(row => [row.key, row.value]));
+  const fullyDisabled = settings.reals_fully_disabled === '1';
   res.json({
     reminder: settings.reals_reminder || 'Evet, reals. Reels olmasını beklerdiniz. Ama reals işte. Gerçekler var burada.',
-    infoEnabled: settings.reals_info_enabled !== '0',
-    mediaEnabled: settings.reals_in_media_enabled !== '0',
-    maintenanceEnabled: settings.reals_maintenance_enabled === '1',
-    maintenanceMessage: settings.reals_maintenance_message || DEFAULT_REALS_MAINTENANCE_MESSAGE
+    // Tamamen kapalıyken diğer alt bilgileri gizle: profil sekmesi, medya karışık görünümü vs.
+    infoEnabled: !fullyDisabled && settings.reals_info_enabled !== '0',
+    mediaEnabled: !fullyDisabled && settings.reals_in_media_enabled !== '0',
+    maintenanceEnabled: !fullyDisabled && settings.reals_maintenance_enabled === '1',
+    maintenanceMessage: settings.reals_maintenance_message || DEFAULT_REALS_MAINTENANCE_MESSAGE,
+    fullyDisabled,
+    disabledMessage: settings.reals_disabled_message || DEFAULT_REALS_DISABLED_MESSAGE
   });
 });
 
