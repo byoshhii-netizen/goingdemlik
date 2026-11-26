@@ -3534,6 +3534,32 @@ function fwSeverityDot(level) {
   return `<span class="fw-sev fw-sev--${value}" title="${escHtml(FIREWALL_SEVERITY_LABELS[value])}"></span>`;
 }
 
+// Bir IP'ye bağlı KAYITLI kullanıcıları çip olarak gösterir.
+function fwAccountChips(accounts) {
+  if (!Array.isArray(accounts) || !accounts.length) return '';
+  const chips = accounts.slice(0, 8).map(acc => {
+    const tone = acc.is_admin ? 'danger' : acc.banned ? 'warn' : 'info';
+    const title = acc.is_admin ? 'Yetkili hesap' : acc.banned ? 'Yasaklı hesap' : 'Kayıtlı kullanıcı';
+    return `<a class="fw-user-chip fw-user-chip--${tone}" href="#" data-fw-user="${escHtml(acc.username)}" title="${title}">
+      <i class="fas fa-${acc.is_admin ? 'user-shield' : acc.banned ? 'user-slash' : 'user'}"></i>@${escHtml(acc.username)}</a>`;
+  }).join('');
+  const more = accounts.length > 8 ? `<span class="fw-user-chip fw-user-chip--muted">+${accounts.length - 8}</span>` : '';
+  return `<div class="fw-users"><span class="fw-users-label"><i class="fas fa-id-badge"></i>Kayıtlı kullanıcı:</span>${chips}${more}</div>`;
+}
+
+// Kullanıcı çiplerine tıklanınca o kullanıcıyı yönetim aramasında aç.
+function fwBindUserChips(scope) {
+  scope.querySelectorAll('[data-fw-user]').forEach(chip => chip.addEventListener('click', event => {
+    event.preventDefault();
+    const username = chip.dataset.fwUser;
+    try {
+      if (typeof ccOpenUserByUsername === 'function') return ccOpenUserByUsername(username);
+      if (typeof navigateTo === 'function') { navigateTo('users'); }
+    } catch {}
+    toast(`Kullanıcı: @${username}`);
+  }));
+}
+
 async function renderFirewall(main) {
   let payload;
   try { payload = await adminApi('/firewall/config'); }
@@ -3615,14 +3641,22 @@ async function fwOverview(pane) {
       ${hint ? `<em>${escHtml(hint)}</em>` : ''}</div>
     </div>`;
 
+  const runtime = data.runtime || {};
+  const attackBanner = runtime.under_attack
+    ? `<div class="card fw-card" style="border-color:rgba(225,29,72,.5);background:rgba(225,29,72,.08)">
+         <strong style="color:#ff8098"><i class="fas fa-triangle-exclamation"></i> Saldırı altında modu aktif</strong>
+         <div class="fw-sub-note">Genel istek hızı eşiği aştı (${escHtml(String(runtime.rps ?? 0))}/sn). IP başına hız otomatik sıkılaştırıldı.</div>
+       </div>` : '';
+
   pane.innerHTML = `
+    ${attackBanner}
     <div class="fw-stats">
       ${card('bolt', 'Son 1 saat', totals.last_hour, 'yakalanan deneme')}
       ${card('calendar-day', 'Son 24 saat', totals.last_24h, 'yakalanan deneme')}
       ${card('shield-halved', 'Engellenen', totals.blocked, 'toplam')}
       ${card('network-wired', 'Farklı IP', totals.unique_ips, 'deneme yapan')}
-      ${card('ban', 'Aktif yasak', data.bans?.active, `${data.bans?.permanent || 0} kalıcı`)}
-      ${card('database', 'Toplam kayıt', totals.total, `kuyruk: ${data.runtime?.queue ?? 0}`)}
+      ${card('ban', 'Aktif yasak', data.bans?.active, `${data.bans?.permanent || 0} kalıcı${runtime.subnet_bans ? ` · ${runtime.subnet_bans} blok` : ''}`)}
+      ${card('gauge-high', 'Anlık hız', `${runtime.rps ?? 0}/sn`, runtime.under_attack ? 'saldırı altında' : 'normal')}
     </div>
 
     <div class="card fw-card">
@@ -3650,7 +3684,8 @@ async function fwOverview(pane) {
         ${data.top_ips.length ? `<div class="fw-iplist">${data.top_ips.map(row => `
           <div class="fw-ip-row">
             <div><code>${escHtml(row.ip)}</code>${row.country ? `<span class="fw-flag">${escHtml(row.country)}</span>` : ''}
-              <small>${escHtml((row.categories || []).filter(Boolean).map(key => firewallState.categories?.[key]?.label || key).join(' · ') || '—')}</small></div>
+              <small>${escHtml((row.categories || []).filter(Boolean).map(key => firewallState.categories?.[key]?.label || key).join(' · ') || '—')}</small>
+              ${fwAccountChips(row.accounts)}</div>
             <div class="fw-ip-right"><b>${row.total}</b>
               <button class="btn btn-sm btn-danger" data-fw-ban="${escHtml(row.ip)}" type="button"><i class="fas fa-ban"></i></button></div>
           </div>`).join('')}</div>` : '<p style="color:var(--text3)">Kayıt yok.</p>'}
@@ -3666,6 +3701,7 @@ async function fwOverview(pane) {
       fwRenderPane();
     } catch (error) { toast(error.message, 'error'); }
   }));
+  fwBindUserChips(pane);
 }
 
 // ── Olaylar ────────────────────────────────────────────────────────────────
@@ -3693,6 +3729,7 @@ async function fwEvents(pane) {
         ${event.country ? `<span><i class="fas fa-location-dot"></i>${escHtml([event.city, event.country].filter(Boolean).join(', '))}</span>` : ''}
         <span><i class="fas fa-user"></i>${escHtml(event.actor || 'anonymous')}</span>
       </div>
+      ${fwAccountChips(event.accounts)}
       <details class="fw-event-more">
         <summary>Tüm ayrıntılar</summary>
         <dl>
@@ -3751,6 +3788,7 @@ async function fwEvents(pane) {
     try { await adminApi('/firewall/allowlist', { method: 'POST', body: JSON.stringify({ ip, note: 'Olay listesinden eklendi' }) }); toast(`${ip} izin listesine alındı`); }
     catch (error) { toast(error.message, 'error'); }
   }));
+  fwBindUserChips(pane);
 }
 
 // ── Yasaklılar ─────────────────────────────────────────────────────────────
@@ -3780,6 +3818,7 @@ async function fwBans(pane) {
             <span><i class="fas fa-clock"></i>${escHtml(formatDate(ban.created_at))}</span>
             <button class="btn btn-sm" data-fw-unban="${ban.id}" type="button"><i class="fas fa-unlock"></i> Kaldır</button>
           </div>
+          ${fwAccountChips(ban.accounts)}
         </div>`).join('') : '<div style="padding:40px;text-align:center;color:var(--text3)">Aktif yasak yok.</div>'}
     </div>`;
 
@@ -3795,6 +3834,7 @@ async function fwBans(pane) {
     try { await adminApi(`/firewall/bans/${button.dataset.fwUnban}`, { method: 'DELETE' }); toast('Yasak kaldırıldı'); fwRenderPane(); }
     catch (error) { toast(error.message, 'error'); }
   }));
+  fwBindUserChips(pane);
 }
 
 // ── Kurallar ───────────────────────────────────────────────────────────────
@@ -3976,9 +4016,70 @@ async function fwSettings(pane) {
 
     <div class="card fw-card">
       <h3 class="fw-card-title"><i class="fas fa-bug-slash"></i> Honeypot</h3>
-      ${toggle('fw-honeypot', 'Honeypot açık', config.honeypot_enabled, 'Bu yollara dokunan anında yasaklanır — meşru ziyaretçi buralara hiç gelmez.')}
+      ${toggle('fw-honeypot', 'Honeypot açık', config.honeypot_enabled, 'Bu yollara/alanlara dokunan bot olarak işaretlenir — meşru ziyaretçi buralara hiç gelmez.')}
       <label class="fw-field"><span>Yollar (her satıra bir tane)</span>
         <textarea id="fw-honeypot-paths" rows="5">${escHtml((config.honeypot_paths || []).join('\n'))}</textarea></label>
+      <div class="fw-group-title"><i class="fas fa-shield-heart"></i> Yanlış pozitif güvenceleri</div>
+      <p class="fw-sub-note">Agresif tarayıcı eklentileri, ön yükleyiciler ve erişilebilirlik araçları honeypot'u yanlışlıkla tetikleyebilir. Aşağıdaki ayarlar masum ziyaretçilerin yasaklanmasını önler.</p>
+      <label class="fw-field"><span>Honeypot sonucu</span>
+        <select id="fw-honeypot-action">
+          ${[['ban', 'Anında yasakla (en sert)'], ['block', 'Sadece engelle (yasak yok)'], ['score', 'Sadece puan ekle (eşikte yasak)']]
+            .map(([key, label]) => `<option value="${key}"${(config.honeypot_action || 'ban') === key ? ' selected' : ''}>${escHtml(label)}</option>`).join('')}
+        </select>
+        <small>Yanlış pozitif yaşıyorsanız "Sadece puan"a alın: tek dokunuş yasaklamaz, tekrar edende eşikte yasaklanır.</small></label>
+      ${toggle('fw-honeypot-prefetch', 'Prefetch/erişilebilirlik isteklerini yok say', config.honeypot_ignore_prefetch !== false, 'Sec-Purpose: prefetch gibi ön yükleme istekleri honeypot tetiklemez.')}
+      <div class="fw-grid">
+        ${number('fw-honeypot-grace', 'Tolerans (ilk N dokunuş)', config.honeypot_grace ?? 0, '0 = tolerans yok. 1 = ilk dokunuş sadece puanlanır, ikincisi yasaklar.')}
+        ${number('fw-honeypot-grace-win', 'Tolerans penceresi (sn)', config.honeypot_grace_window_seconds ?? 600)}
+      </div>
+      <label class="fw-field"><span>Gizli form alanı tuzakları (her satıra bir ad)</span>
+        <textarea id="fw-honeypot-fields" rows="2" placeholder="website&#10;company_url">${escHtml((config.honeypot_fields || []).join('\n'))}</textarea>
+        <small>Formlara eklenen, kullanıcıya görünmeyen bu alanlar doluysa gönderen bir bottur. Parola yöneticisi otomatik doldurması için alışılmadık adlar seçin.</small></label>
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-shield-virus"></i> DDoS ve ani yük (flood)</h3>
+      ${toggle('fw-ddos', 'DDoS koruması açık', config.ddos_enabled !== false, 'Sitenin toplam hızını izler; sıçrama olunca otomatik "saldırı altında" moduna geçer.')}
+      <div class="fw-group-title"><i class="fas fa-bolt"></i> Tek IP ani yük (burst)</div>
+      <div class="fw-grid">
+        ${number('fw-burst-win', 'Pencere (sn)', config.burst_window_seconds ?? 3)}
+        ${number('fw-burst-max', 'Pencere başına istek', config.burst_max_requests ?? 60)}
+        ${number('fw-burst-score', 'Aşımda puan', config.burst_score ?? 10)}
+      </div>
+      <div class="fw-group-title"><i class="fas fa-tower-broadcast"></i> Genel "saldırı altında" eşiği</div>
+      <div class="fw-grid">
+        ${number('fw-ddos-rps', 'Saldırı eşiği (toplam istek/sn)', config.ddos_global_rps ?? 800, 'Tüm siteden saniyede bu kadar istek gelirse sıkı moda geçilir.')}
+        ${number('fw-ddos-ip-rps', 'Saldırıda IP başına istek/sn', config.ddos_under_attack_ip_rps ?? 15)}
+        ${number('fw-ddos-secs', 'Sıkı modda kal (sn)', config.ddos_under_attack_seconds ?? 120)}
+      </div>
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-network-wired"></i> Alt ağ (subnet) davranışı</h3>
+      <p class="fw-sub-note">Ardışık IP'lerden (örn. 152.233.12.x ve 152.233.13.x) gelen dağıtık denemeyi tek tek IP gibi değil, bir blok olarak değerlendirir. Bir /24 (IPv6'da /64) içinde kısa sürede çok sayıda IP tetiklerse puan çarpanla büyür ve blok topluca yasaklanabilir.</p>
+      ${toggle('fw-subnet', 'Alt ağ takibi açık', config.subnet_enabled !== false)}
+      <div class="fw-grid">
+        ${number('fw-subnet-win', 'Pencere (sn)', config.subnet_window_seconds ?? 600)}
+        ${number('fw-subnet-ips', 'Blok "sıcak" sayılsın: farklı IP', config.subnet_distinct_ips ?? 4)}
+        ${number('fw-subnet-score', 'Blok yasak eşiği (puan)', config.subnet_score_threshold ?? 40)}
+        ${number('fw-subnet-mult', 'Sıcak blokta puan çarpanı', config.subnet_multiplier ?? 2)}
+        ${number('fw-subnet-rate', 'Blok başına istek üst sınırı', config.subnet_rate_max ?? 600)}
+      </div>
+      ${toggle('fw-subnet-whole', 'Eşik aşılınca tüm bloğu yasakla', config.subnet_ban_whole !== false, 'Açıkken tek IP yerine /24 (IPv6 /64) tamamı yasaklanır.')}
+    </div>
+
+    <div class="card fw-card">
+      <h3 class="fw-card-title"><i class="fas fa-key"></i> Kaba kuvvet (brute force) — giriş koruması</h3>
+      <p class="fw-sub-note">Giriş ekranına yapılan başarısız denemeleri IP ve hesap bazında sayar. Eşik aşılınca giriş bir süre kilitlenir ve (seçiliyse) IP yasaklanır.</p>
+      ${toggle('fw-bf', 'Kaba kuvvet koruması açık', config.bruteforce_enabled !== false)}
+      <div class="fw-grid">
+        ${number('fw-bf-win', 'Pencere (sn)', config.bruteforce_window_seconds ?? 900)}
+        ${number('fw-bf-ip', 'IP başına başarısız deneme', config.bruteforce_ip_max ?? 10)}
+        ${number('fw-bf-acct', 'Hesap başına başarısız deneme', config.bruteforce_account_max ?? 6)}
+        ${number('fw-bf-score', 'Her denemede puan', config.bruteforce_score ?? 6)}
+        ${number('fw-bf-lock', 'Giriş kilidi (dk)', config.bruteforce_lock_minutes ?? 30)}
+      </div>
+      ${toggle('fw-bf-ban', 'Eşik aşan IP yasaklansın', config.bruteforce_ban !== false)}
     </div>
 
     <div class="card fw-card">
@@ -4074,6 +4175,32 @@ async function fwSettings(pane) {
       notfound_score: Number($('#fw-nf-score').value),
       honeypot_enabled: $('#fw-honeypot').checked,
       honeypot_paths: lines($('#fw-honeypot-paths').value),
+      honeypot_action: $('#fw-honeypot-action').value,
+      honeypot_ignore_prefetch: $('#fw-honeypot-prefetch').checked,
+      honeypot_grace: Number($('#fw-honeypot-grace').value),
+      honeypot_grace_window_seconds: Number($('#fw-honeypot-grace-win').value),
+      honeypot_fields: lines($('#fw-honeypot-fields').value),
+      ddos_enabled: $('#fw-ddos').checked,
+      burst_window_seconds: Number($('#fw-burst-win').value),
+      burst_max_requests: Number($('#fw-burst-max').value),
+      burst_score: Number($('#fw-burst-score').value),
+      ddos_global_rps: Number($('#fw-ddos-rps').value),
+      ddos_under_attack_ip_rps: Number($('#fw-ddos-ip-rps').value),
+      ddos_under_attack_seconds: Number($('#fw-ddos-secs').value),
+      subnet_enabled: $('#fw-subnet').checked,
+      subnet_window_seconds: Number($('#fw-subnet-win').value),
+      subnet_distinct_ips: Number($('#fw-subnet-ips').value),
+      subnet_score_threshold: Number($('#fw-subnet-score').value),
+      subnet_multiplier: Number($('#fw-subnet-mult').value),
+      subnet_rate_max: Number($('#fw-subnet-rate').value),
+      subnet_ban_whole: $('#fw-subnet-whole').checked,
+      bruteforce_enabled: $('#fw-bf').checked,
+      bruteforce_window_seconds: Number($('#fw-bf-win').value),
+      bruteforce_ip_max: Number($('#fw-bf-ip').value),
+      bruteforce_account_max: Number($('#fw-bf-acct').value),
+      bruteforce_score: Number($('#fw-bf-score').value),
+      bruteforce_lock_minutes: Number($('#fw-bf-lock').value),
+      bruteforce_ban: $('#fw-bf-ban').checked,
       skip_static: $('#fw-skip-static').checked,
       inspect_body: $('#fw-inspect-body').checked,
       skip_paths: lines($('#fw-skip-paths').value),

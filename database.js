@@ -2222,6 +2222,14 @@ Talepleriniz için platform üzerinden iletişime geçebilirsiniz.`]);
       created_by TEXT DEFAULT '',
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    -- IP ↔ kayıtlı kullanıcı eşleştirmesi için indeksler (güvenlik duvarı paneli
+    -- yasaklı/şüpheli bir IP'ye hangi hesabın bağlı olduğunu bu sütunlardan bulur).
+    CREATE INDEX IF NOT EXISTS idx_login_events_ip ON login_events(ip);
+    CREATE INDEX IF NOT EXISTS idx_login_events_ip_pattern ON login_events(ip text_pattern_ops);
+    CREATE INDEX IF NOT EXISTS idx_users_ip ON users(ip);
+    CREATE INDEX IF NOT EXISTS idx_sessions_ip ON sessions(ip);
+    CREATE INDEX IF NOT EXISTS idx_firewall_bans_active ON firewall_bans(active) WHERE active;
   `);
 
   console.log('PostgreSQL bağlantısı ve tablolar hazır.');

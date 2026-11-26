@@ -56,12 +56,59 @@ const DEFAULT_CONFIG = {
   notfound_max: 20,
   notfound_score: 8,
 
+  // ── Ani yük (burst) ve DDoS ────────────────────────────────────────────────
+  // Hız sınırı bir IP'nin ortalama hızını ölçer; burst çok kısa penceredeki
+  // ani patlamayı yakalar. DDoS katmanı ise sitenin TOPLAM hızını izler: toplam
+  // saniye/istek bir eşiği aşarsa "saldırı altında" moduna geçilir ve o süre
+  // boyunca IP başına izin verilen hız otomatik olarak sıkılaştırılır.
+  ddos_enabled: true,
+  burst_window_seconds: 3,
+  burst_max_requests: 60,
+  burst_score: 10,
+  ddos_global_rps: 800,            // saniyedeki toplam istek bunu aşarsa saldırı altı
+  ddos_under_attack_ip_rps: 15,    // saldırı altında IP başına saniye üst sınırı
+  ddos_under_attack_seconds: 120,  // bir sıçramadan sonra bu kadar süre sıkı kal
+
+  // ── Alt ağ (subnet) davranışı ──────────────────────────────────────────────
+  // Ardışık IP'lerden (152.233.12.x, 152.233.13.x) gelen dağıtık denemeyi tek
+  // tek IP gibi değil, bir blok olarak değerlendirir. Bir /24 (IPv6'da /64)
+  // içinde kısa sürede birden çok farklı IP tetiklerse puanları çarpanla büyür
+  // ve eşiği aşan blok topluca yasaklanabilir.
+  subnet_enabled: true,
+  subnet_window_seconds: 600,
+  subnet_distinct_ips: 4,          // pencerede bu kadar farklı IP = blok "sıcak"
+  subnet_score_threshold: 40,      // sıcak blok toplam puanı bunu aşarsa blok yasağı
+  subnet_multiplier: 2,            // sıcak bloktaki her IP'nin puanı bu kat büyür
+  subnet_ban_whole: true,         // eşik aşılınca tek IP yerine tüm /24 (IPv6 /64) yasakla
+  subnet_rate_max: 600,            // blok başına penceredeki istek üst sınırı
+
+  // ── Kaba kuvvet (brute force) ───────────────────────────────────────────────
+  // Giriş uçları başarısız denemeleri firewall'a bildirir. IP ya da hesap başına
+  // başarısız deneme eşiği aşılınca giriş bir süre kilitlenir ve IP yasaklanır.
+  bruteforce_enabled: true,
+  bruteforce_window_seconds: 900,
+  bruteforce_ip_max: 10,           // IP başına penceredeki başarısız giriş
+  bruteforce_account_max: 6,       // hesap başına penceredeki başarısız giriş
+  bruteforce_score: 6,             // her başarısız denemede eklenen puan
+  bruteforce_lock_minutes: 30,     // giriş kilidi süresi
+  bruteforce_ban: true,            // eşik aşılınca IP'yi yasakla
+
   // Kategori anahtarları: her biri açılıp kapatılabilir ve puanı değiştirilebilir
   categories: {},
 
   // Honeypot: buraya dokunan anında yasaklanır
   honeypot_enabled: true,
   honeypot_paths: ['/wp-login.php', '/wp-admin/', '/phpmyadmin/', '/.env', '/.git/config'],
+  // Honeypot güvenceleri — yanlış pozitifleri azaltır:
+  //  honeypot_action: ban | block | score  (score = anında yasak yok, sadece puan)
+  //  honeypot_ignore_prefetch: prefetch/preload/erişilebilirlik isteklerini yok say
+  //  honeypot_grace: >0 ise pencere içinde ilk N dokunuş yalnızca puanlanır
+  //  honeypot_fields: gizli form alanı adları (POST gövdesinde doluysa bot sinyali)
+  honeypot_action: 'ban',
+  honeypot_ignore_prefetch: true,
+  honeypot_grace: 0,
+  honeypot_grace_window_seconds: 600,
+  honeypot_fields: [],
 
   // Ülke filtresi (Cloudflare cf-ipcountry başlığı gerekir)
   country_mode: 'off',            // off | allow | block
@@ -112,6 +159,10 @@ const CATEGORIES = {
   honeypot:       { label: 'Honeypot', score: 100, severity: 5, action: 'ban' },
   rate:           { label: 'Hız sınırı', score: 6, severity: 3, action: 'block' },
   notfound:       { label: '404 fırtınası', score: 8, severity: 3, action: 'ban' },
+  burst:          { label: 'Ani yük (flood)', score: 10, severity: 4, action: 'block' },
+  ddos:           { label: 'DDoS / saldırı altında', score: 12, severity: 5, action: 'block' },
+  subnet:         { label: 'Alt ağ saldırısı', score: 20, severity: 4, action: 'ban' },
+  bruteforce:     { label: 'Kaba kuvvet (giriş)', score: 6, severity: 4, action: 'block' },
   country:        { label: 'Ülke filtresi', score: 100, severity: 3, action: 'block' },
   custom:         { label: 'Özel kural', score: 10, severity: 3, action: 'block' }
 };
@@ -204,9 +255,69 @@ const BUILTIN_RULES = [
 // ─────────────────────────────────────────────────────────────────────────────
 const STATIC_EXT = /\.(css|js|mjs|map|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|eot|mp4|webm|mp3|m4a|wav|ogg|pdf)$/i;
 const ALLOWED_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
+const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 
 function normalizeIp(value) {
   return String(value || '').replace(/^::ffff:/i, '').trim().slice(0, 64);
+}
+
+// Bir IP'nin ait olduğu alt ağı döndürür:
+//   key    → bellek içi sayaç anahtarı (ör. "152.233.13." ya da "2a01:4f8:1c:...:")
+//   cidr   → yasak kaydında saklanacak okunur blok (ör. "152.233.13.0/24")
+//   prefix → yasak eşleşmesi için IP önekiyle karşılaştırılacak dize
+// IPv4'te /24, IPv6'da ilk 4 grup (/64) kullanılır. Eşleştirilemezse null.
+function subnetOf(ip) {
+  const value = normalizeIp(ip).toLowerCase();
+  if (IPV4_RE.test(value)) {
+    const octets = value.split('.');
+    if (octets.length === 4 && octets.every(o => Number(o) >= 0 && Number(o) <= 255)) {
+      const prefix = `${octets[0]}.${octets[1]}.${octets[2]}.`;
+      return { key: `v4:${prefix}`, cidr: `${prefix}0/24`, prefix };
+    }
+    return null;
+  }
+  if (value.includes(':')) {
+    // IPv6 — ilk 4 hextet'i al (/64). "::" kısaltmasını güvenle çözmeye çalışma;
+    // önek yeterli ayrımı sağlar.
+    const head = value.split('::')[0];
+    const groups = head.split(':').filter(Boolean).slice(0, 4);
+    if (groups.length) {
+      const prefix = groups.join(':') + ':';
+      return { key: `v6:${prefix}`, cidr: `${groups.join(':')}::/64`, prefix };
+    }
+  }
+  return null;
+}
+
+// Bir CIDR/blok yasak kaydı (ör. "152.233.13.0/24" veya "152.233.13.*") verilen
+// IP'yi kapsıyor mu? Kapsıyorsa eşleşme öneki döner, yoksa null.
+function cidrPrefix(entry) {
+  const value = String(entry || '').trim().toLowerCase();
+  if (value.endsWith('.0/24') || value.endsWith('.*')) {
+    return value.replace(/\.0\/24$/, '.').replace(/\.\*$/, '.');
+  }
+  if (value.endsWith('::/64')) {
+    return value.replace(/::\/64$/, ':');
+  }
+  if (value.includes('/')) {
+    // Diğer CIDR'ler için kaba önek: ağ kısmının son sıfır grubunu kırp.
+    return value.split('/')[0].replace(/(\.|:)0+$/, '$1');
+  }
+  return null;
+}
+
+// Prefetch / preload / erişilebilirlik isteği mi? Tarayıcı eklentileri ve ön
+// yükleyiciler kullanıcı hiç tıklamadan honeypot bağlantısına gidebilir; bu
+// isteklerde honeypot'u tetiklemek yanlış pozitif üretir.
+function looksLikePrefetch(req) {
+  const get = name => String(req.get?.(name) || '').toLowerCase();
+  const purpose = get('sec-purpose') || get('purpose') || get('x-purpose') || get('x-moz');
+  if (/prefetch|preload|prerender/.test(purpose)) return true;
+  if (get('x-moz') === 'prefetch') return true;
+  // Tarayıcıların güvenli/ön-getirme sinyalleri
+  const secFetch = get('sec-fetch-mode');
+  if (get('x-requested-with') === 'preload') return true;
+  return false;
 }
 
 function safeDecode(value) {
@@ -307,16 +418,29 @@ function createFirewall({ query, getIp, getClientInfo, onBan, isExempt } = {}) {
     rules: BUILTIN_RULES.map(compileRule),
     customRules: [],
     bans: new Map(),        // ip -> { id, expiresAt (ms|null), reason, permanent }
+    banPrefixes: [],        // [{ prefix, ban }] — blok/CIDR yasakları
     allowlist: new Set(),
     allowPrefixes: [],      // "1.2.3." gibi önek eşleşmeleri
     loadedAt: 0,
-    ready: false
+    ready: false,
+    underAttackUntil: 0     // bu zamana kadar "saldırı altında" sıkı mod
   };
 
   const rate = new SlidingWindow();
   const notFound = new SlidingWindow();
+  const burst = new SlidingWindow();          // çok kısa pencere — ani yük
+  const attackRate = new SlidingWindow();     // saldırı altında IP başına sn hızı
+  const subnetRate = new SlidingWindow();     // blok başına istek hızı
   const scores = new ScoreBook();
+  const subnetScores = new ScoreBook();       // blok başına puan
+  const subnetMembers = new Map();            // subnetKey -> Map(ip -> lastTs)
+  const authFailIp = new SlidingWindow();     // IP başına başarısız giriş
+  const authFailAccount = new SlidingWindow(); // hesap başına başarısız giriş
+  const loginLocks = new Map();               // "ip:x" / "acct:x" -> kilit bitişi (ms)
   const banNoticeThrottle = new Map(); // yasaklı IP'nin logunu saniyede bir kez yaz
+
+  // Genel istek hızı (DDoS tespiti): son birkaç saniyenin saniyelik kovaları
+  const globalBuckets = new Map(); // saniye epoch -> sayaç
 
   const stats = {
     inspected: 0, matched: 0, blocked: 0, banned: 0,
@@ -417,15 +541,24 @@ function createFirewall({ query, getIp, getClientInfo, onBan, isExempt } = {}) {
         "SELECT id, ip, reason, permanent, expires_at FROM firewall_bans WHERE active=TRUE AND (permanent=TRUE OR expires_at > NOW())"
       );
       const next = new Map();
+      const prefixes = [];
       for (const row of rows) {
-        next.set(normalizeIp(row.ip), {
+        const rawIp = String(row.ip || '').trim();
+        const entry = {
           id: row.id,
           reason: row.reason || '',
           permanent: Boolean(row.permanent),
           expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : null
-        });
+        };
+        const prefix = cidrPrefix(rawIp);
+        if (prefix) {
+          prefixes.push({ prefix, ban: { ...entry, cidr: rawIp } });
+        } else {
+          next.set(normalizeIp(rawIp), entry);
+        }
       }
       state.bans = next;
+      state.banPrefixes = prefixes;
     } catch (error) {
       console.error('[firewall] Yasak listesi okunamadı:', error.message);
     }
@@ -460,18 +593,30 @@ function createFirewall({ query, getIp, getClientInfo, onBan, isExempt } = {}) {
 
   function activeBan(ip, now) {
     const ban = state.bans.get(ip);
-    if (!ban) return null;
-    if (!ban.permanent && ban.expiresAt && ban.expiresAt <= now) {
-      state.bans.delete(ip);
-      return null;
+    if (ban) {
+      if (!ban.permanent && ban.expiresAt && ban.expiresAt <= now) {
+        state.bans.delete(ip);
+      } else {
+        return ban;
+      }
     }
-    return ban;
+    // Blok / CIDR yasakları: IP bir yasaklı alt ağın içinde mi?
+    if (state.banPrefixes.length) {
+      for (const item of state.banPrefixes) {
+        if (!item.prefix || !ip.startsWith(item.prefix)) continue;
+        const sub = item.ban;
+        if (!sub.permanent && sub.expiresAt && sub.expiresAt <= now) continue;
+        return sub;
+      }
+    }
+    return null;
   }
 
   // ── Yasaklama ──────────────────────────────────────────────────────────────
   async function banIp(ip, { reason, category, score, createdBy = 'auto', minutes, permanent = false } = {}) {
     const address = normalizeIp(ip);
     if (!address || isAllowed(address)) return null;
+    const asPrefix = cidrPrefix(address); // blok (CIDR) yasağı mı?
     const config = state.config;
     let priorCount = 0;
     try {
@@ -500,12 +645,21 @@ function createFirewall({ query, getIp, getClientInfo, onBan, isExempt } = {}) {
         [address, String(reason || '').slice(0, 300), String(category || '').slice(0, 64), Math.round(score || 0), isPermanent, expiresAt, String(createdBy).slice(0, 64)]
       );
       const row = rows[0];
-      state.bans.set(address, {
+      const memEntry = {
         id: row?.id,
         reason: String(reason || ''),
         permanent: Boolean(row?.permanent ?? isPermanent),
         expiresAt: row?.expires_at ? new Date(row.expires_at).getTime() : (expiresAt ? expiresAt.getTime() : null)
-      });
+      };
+      if (asPrefix) {
+        // Aynı bloğun eski kaydını değiştirip yenisini ekle
+        state.banPrefixes = state.banPrefixes.filter(item => item.prefix !== asPrefix);
+        state.banPrefixes.push({ prefix: asPrefix, ban: { ...memEntry, cidr: address } });
+        subnetScores.reset(`v4:${asPrefix}`);
+        subnetScores.reset(`v6:${asPrefix}`);
+      } else {
+        state.bans.set(address, memEntry);
+      }
       scores.reset(address);
       stats.banned++;
       if (typeof onBan === 'function') {
@@ -521,6 +675,8 @@ function createFirewall({ query, getIp, getClientInfo, onBan, isExempt } = {}) {
   async function unbanIp(ip) {
     const address = normalizeIp(ip);
     state.bans.delete(address);
+    const asPrefix = cidrPrefix(address);
+    if (asPrefix) state.banPrefixes = state.banPrefixes.filter(item => item.prefix !== asPrefix);
     scores.reset(address);
     try {
       await query('UPDATE firewall_bans SET active=FALSE, released_at=NOW() WHERE ip=$1 AND active=TRUE', [address]);
@@ -528,6 +684,106 @@ function createFirewall({ query, getIp, getClientInfo, onBan, isExempt } = {}) {
     } catch (error) {
       console.error('[firewall] Yasak kaldırılamadı:', error.message);
       return false;
+    }
+  }
+
+  // ── Alt ağ (subnet) takibi ─────────────────────────────────────────────────
+  // Bir bloğun pencere içindeki farklı IP sayısını sayar; ardışık IP'lerden
+  // gelen dağıtık saldırıyı görünür kılar.
+  function subnetTrackIp(key, ip, now, windowMs) {
+    let members = subnetMembers.get(key);
+    if (!members) { members = new Map(); subnetMembers.set(key, members); }
+    members.set(ip, now);
+    const cutoff = now - windowMs;
+    for (const [addr, ts] of members) if (ts < cutoff) members.delete(addr);
+    return members.size;
+  }
+
+  // ── DDoS: genel istek hızı ──────────────────────────────────────────────────
+  function recordGlobalRequest(now) {
+    const sec = Math.floor(now / 1000);
+    globalBuckets.set(sec, (globalBuckets.get(sec) || 0) + 1);
+    // Son 3 saniyenin dışını at
+    for (const bucket of globalBuckets.keys()) if (bucket < sec - 3) globalBuckets.delete(bucket);
+  }
+  function currentRps(now) {
+    const sec = Math.floor(now / 1000);
+    // Bir önceki tam saniyenin sayısı en kararlı ölçüdür
+    return globalBuckets.get(sec - 1) || globalBuckets.get(sec) || 0;
+  }
+
+  // ── Kaba kuvvet (brute force) ───────────────────────────────────────────────
+  // server.js giriş uçlarından çağrılır. Her başarısız denemeyi IP ve hesap
+  // bazında sayar; eşik aşılınca girişi kilitler ve (ayarlıysa) IP'yi yasaklar.
+  function loginBlocked(ip, account) {
+    const config = state.config;
+    if (!config.bruteforce_enabled) return null;
+    const now = Date.now();
+    const address = normalizeIp(ip);
+    const ipLock = loginLocks.get(`ip:${address}`);
+    if (ipLock && ipLock > now) return { scope: 'ip', until: ipLock };
+    const acct = String(account || '').trim().toLowerCase();
+    if (acct) {
+      const acctLock = loginLocks.get(`acct:${acct}`);
+      if (acctLock && acctLock > now) return { scope: 'account', until: acctLock };
+    }
+    return null;
+  }
+
+  function registerAuthFailure(ip, account, req) {
+    const config = state.config;
+    if (!config.bruteforce_enabled) return { locked: false };
+    const now = Date.now();
+    const address = normalizeIp(ip);
+    const acct = String(account || '').trim().toLowerCase().slice(0, 190);
+    const windowMs = config.bruteforce_window_seconds * 1000;
+    const ipCount = authFailIp.hit(`${address}`, windowMs, now);
+    const acctCount = acct ? authFailAccount.hit(acct, windowMs, now) : 0;
+
+    // Her başarısız deneme puan da ekler (diğer kurallarla birikir)
+    const subject = { method: req?.method || 'POST', path: req?.path || '/login' };
+    const overIp = ipCount >= config.bruteforce_ip_max;
+    const overAcct = acct && acctCount >= config.bruteforce_account_max;
+    let locked = false;
+
+    if (overIp || overAcct) {
+      const lockMs = config.bruteforce_lock_minutes * 60000;
+      if (overIp) loginLocks.set(`ip:${address}`, now + lockMs);
+      if (overAcct) loginLocks.set(`acct:${acct}`, now + lockMs);
+      locked = true;
+      const label = overIp
+        ? `Kaba kuvvet: ${ipCount} başarısız giriş (IP)`
+        : `Kaba kuvvet: ${acctCount} başarısız giriş (@${acct})`;
+      if (req) {
+        writeEvent(req, address, {
+          ruleId: 'bruteforce', label, category: 'bruteforce',
+          severity: 4, score: config.bruteforce_score, action: 'blocked', matched: String(overIp ? ipCount : acctCount)
+        }, `Hesap: ${acct || '—'}`);
+      }
+      if (overIp && config.bruteforce_ban) {
+        banIp(address, { reason: label, category: 'bruteforce', score: config.bruteforce_score * ipCount }).catch(() => {});
+      }
+    } else {
+      // Eşik altı: sadece puanla, birikimi score defterine ekle
+      scores.add(address, config.bruteforce_score, config.score_window_seconds * 1000, now);
+      if (req) {
+        writeEvent(req, address, {
+          ruleId: 'bruteforce-try', label: `Başarısız giriş denemesi (${ipCount})`, category: 'bruteforce',
+          severity: 2, score: config.bruteforce_score, action: 'log', matched: String(ipCount)
+        }, `Hesap: ${acct || '—'}`);
+      }
+    }
+    return { locked, ipCount, acctCount };
+  }
+
+  function registerAuthSuccess(ip, account) {
+    const address = normalizeIp(ip);
+    authFailIp.map.delete(`${address}`);
+    loginLocks.delete(`ip:${address}`);
+    const acct = String(account || '').trim().toLowerCase();
+    if (acct) {
+      authFailAccount.map.delete(acct);
+      loginLocks.delete(`acct:${acct}`);
     }
   }
 
@@ -645,28 +901,102 @@ function createFirewall({ query, getIp, getClientInfo, onBan, isExempt } = {}) {
       }
     }
 
-    // 4) Honeypot — anında yasak
-    if (config.honeypot_enabled) {
+    // 4) Honeypot — güvencelerle
+    let honeypotHit = null; // 'score' modunda puanlama hattına katılır
+    // GÜVENCE 1 (yanlış pozitif): prefetch/preload/erişilebilirlik istekleri
+    //   honeypot'u tetiklemez; tarayıcı eklentisi veya ön yükleyici yüzünden
+    //   masum ziyaretçi yasaklanmasın.
+    // GÜVENCE 2: honeypot_action ile sonuç seçilir (ban / block / sadece puan).
+    // GÜVENCE 3: honeypot_grace>0 ise bloktaki ilk N dokunuş yalnız puanlanır.
+    const prefetch = config.honeypot_ignore_prefetch && looksLikePrefetch(req);
+    if (config.honeypot_enabled && !prefetch) {
       const lowered = reqPath.toLowerCase();
-      const trap = config.honeypot_paths.find(entry => {
+      // Hem tam yol hem de gizli form alanı tuzağı
+      let trap = config.honeypot_paths.find(entry => {
         const value = String(entry || '').toLowerCase().trim();
         return value && (lowered === value || lowered.startsWith(value));
       });
+      // Gizli form alanı: POST gövdesinde tanımlı tuzak alan doluysa = bot
+      if (!trap && Array.isArray(config.honeypot_fields) && config.honeypot_fields.length
+          && req.body && typeof req.body === 'object') {
+        const filled = config.honeypot_fields.find(name => {
+          const key = String(name || '').trim();
+          return key && req.body[key] != null && String(req.body[key]).trim() !== '';
+        });
+        if (filled) trap = `form:${filled}`;
+      }
       if (trap) {
+        // Honeypot puanı admin panelinden ayarlanabilir (kategori puanı).
+        const hpScore = Number.isFinite(Number(config.categories?.honeypot?.score))
+          ? Number(config.categories.honeypot.score) : CATEGORIES.honeypot.score;
+        const graceWindow = (config.honeypot_grace_window_seconds || 600) * 1000;
+        const touches = config.honeypot_grace > 0 ? rate.hit(`hp:${ip}`, graceWindow, now) : 999;
+        const inGrace = config.honeypot_grace > 0 && touches <= config.honeypot_grace;
+        // Tolerans içinde: yalnızca yumuşak puan (tek dokunuş tek başına eşiği
+        // aşmasın ki masum ziyaretçi ilk kazada yasaklanmasın).
+        const mode = inGrace ? 'grace' : (config.honeypot_action || 'ban');
+        const doBan = enforcing && mode === 'ban';
+        const doBlock = enforcing && (mode === 'ban' || mode === 'block');
         const hit = {
           ruleId: 'honeypot', label: `Honeypot: ${trap}`, category: 'honeypot',
-          severity: 5, score: CATEGORIES.honeypot.score, action: enforcing ? 'banned' : 'monitor', matched: trap
+          severity: 5, score: hpScore,
+          action: !enforcing ? 'monitor' : (doBan ? 'banned' : doBlock ? 'blocked' : 'log'),
+          matched: trap
         };
-        writeEvent(req, ip, hit, 'Honeypot tetiklendi');
-        if (enforcing) {
-          banIp(ip, { reason: `Honeypot: ${trap}`, category: 'honeypot', score: hit.score }).catch(() => {});
-          return deny(req, res, config);
+        writeEvent(req, ip, hit, inGrace ? `Honeypot (tolerans ${touches}/${config.honeypot_grace})` : 'Honeypot tetiklendi');
+        if (doBan) {
+          banIp(ip, { reason: `Honeypot: ${trap}`, category: 'honeypot', score: hpScore }).catch(() => {});
         }
-        return next();
+        if (doBlock) return deny(req, res, config);
+        if (mode === 'grace') {
+          // Eşiğin yaklaşık dörtte biri kadar yumuşak puan; birikir ama ilk
+          // dokunuş küçük başka sinyallerle birleşse bile masumu yasaklamaz.
+          const soft = Math.max(1, Math.min(hpScore, Math.ceil(config.score_threshold / 4)));
+          scores.add(ip, soft, config.score_window_seconds * 1000, now);
+          // honeypot'tan sonra isteğin kalan motoruna devam (başka sinyal varsa birikir)
+        } else if (mode === 'score') {
+          // Puan modu: honeypot puanını normal pencere puanlamasına ekle; eşiği
+          // aşarsa standart yolla yasaklanır. Burada erken dönme; honeypotHit
+          // aşağıda hits'e katılır.
+          honeypotHit = hit;
+        } else {
+          // ban/block dışı beklenmeyen değerlerde güvenli taraf: engelleme
+          return next();
+        }
       }
     }
 
-    // 5) Hız sınırı
+    // 5) DDoS / ani yük (burst) ve "saldırı altında" modu
+    let floodHit = null;
+    if (config.ddos_enabled) {
+      recordGlobalRequest(now);
+      // Genel hız sıçraması: toplam RPS eşiği aşarsa sıkı moda geç
+      if (config.ddos_global_rps > 0 && currentRps(now) > config.ddos_global_rps) {
+        state.underAttackUntil = now + (config.ddos_under_attack_seconds || 120) * 1000;
+      }
+      const underAttack = now < state.underAttackUntil;
+      if (underAttack && config.ddos_under_attack_ip_rps > 0) {
+        const perSec = attackRate.hit(ip, 1000, now);
+        if (perSec > config.ddos_under_attack_ip_rps) {
+          floodHit = {
+            ruleId: 'ddos-shield', label: `Saldırı altında: IP hızı aşıldı (${perSec}/sn)`,
+            category: 'ddos', severity: 5, score: CATEGORIES.ddos.score, action: 'block', matched: String(perSec)
+          };
+        }
+      }
+      // Çok kısa penceredeki ani patlama (tek IP flood)
+      if (!floodHit && config.burst_max_requests > 0) {
+        const burstCount = burst.hit(ip, config.burst_window_seconds * 1000, now);
+        if (burstCount > config.burst_max_requests) {
+          floodHit = {
+            ruleId: 'burst', label: `Ani yük (${burstCount}/${config.burst_window_seconds}sn)`,
+            category: 'burst', severity: 4, score: config.burst_score, action: 'block', matched: String(burstCount)
+          };
+        }
+      }
+    }
+
+    // 6) Hız sınırı
     let rateHit = null;
     if (config.rate_enabled) {
       const count = rate.hit(ip, config.rate_window_seconds * 1000, now);
@@ -692,6 +1022,8 @@ function createFirewall({ query, getIp, getClientInfo, onBan, isExempt } = {}) {
       referer: String(req.get?.('referer') || '')
     });
     if (rateHit) hits.push(rateHit);
+    if (floodHit) hits.push(floodHit);
+    if (honeypotHit) hits.push(honeypotHit);
 
     // 7) 404 fırtınası — yanıt bittiğinde ölç
     if (config.notfound_enabled) {
@@ -715,7 +1047,39 @@ function createFirewall({ query, getIp, getClientInfo, onBan, isExempt } = {}) {
     const totalPoints = hits.reduce((sum, hit) => sum + (hit.score || 0), 0);
     const windowTotal = scores.add(ip, totalPoints, config.score_window_seconds * 1000, now);
     const worst = hits.reduce((top, hit) => (hit.severity > (top?.severity ?? -1) ? hit : top), null);
-    const wantsBan = hits.some(hit => hit.action === 'ban') || windowTotal >= config.score_threshold;
+
+    // 8b) Alt ağ (subnet) değerlendirmesi — ardışık IP'lerden gelen dağıtık
+    // saldırıyı blok olarak gör. Blokta birden çok farklı IP tetiklendiyse
+    // puanlar çarpanla büyür; eşik aşılırsa tüm blok yasaklanabilir.
+    let subnetBan = null;
+    if (config.subnet_enabled) {
+      const sub = subnetOf(ip);
+      if (sub) {
+        const subWindow = config.subnet_window_seconds * 1000;
+        const distinct = subnetTrackIp(sub.key, ip, now, subWindow);
+        const hot = distinct >= config.subnet_distinct_ips;
+        const factor = hot ? Math.max(1, config.subnet_multiplier) : 1;
+        const subTotal = subnetScores.add(sub.key, totalPoints * factor, subWindow, now);
+        const subReqs = subnetRate.hit(sub.key, subWindow, now);
+        const overScore = hot && subTotal >= config.subnet_score_threshold;
+        const overRate = config.subnet_rate_max > 0 && subReqs > config.subnet_rate_max && distinct >= 2;
+        if (enforcing && (overScore || overRate)) {
+          subnetBan = {
+            cidr: sub.cidr,
+            reason: `Alt ağ saldırısı: ${distinct} IP · ${subTotal} puan · ${subReqs} istek`,
+            distinct, subTotal
+          };
+        } else if (hot) {
+          // Bloğu sıcak ama eşik altı: olayı görünür kıl
+          writeEvent(req, ip, {
+            ruleId: 'subnet-hot', label: `Alt ağ hareketli: ${sub.cidr} (${distinct} IP)`, category: 'subnet',
+            severity: 3, score: 0, action: enforcing ? 'blocked' : 'monitor', matched: sub.cidr
+          }, `Blok puanı: ${subTotal}/${config.subnet_score_threshold}`);
+        }
+      }
+    }
+
+    const wantsBan = hits.some(hit => hit.action === 'ban') || windowTotal >= config.score_threshold || Boolean(subnetBan);
     const wantsBlock = wantsBan || hits.some(hit => hit.action === 'block');
 
     let action = 'log';
@@ -729,10 +1093,21 @@ function createFirewall({ query, getIp, getClientInfo, onBan, isExempt } = {}) {
 
     if (!enforcing) return next();
 
+    if (subnetBan && config.subnet_ban_whole) {
+      // Tüm bloğu yasakla — tek tek IP yerine /24 (IPv6 /64)
+      writeEvent(req, ip, {
+        ruleId: 'subnet-ban', label: `Alt ağ yasaklandı: ${subnetBan.cidr}`, category: 'subnet',
+        severity: 5, score: subnetBan.subTotal, action: 'banned', matched: subnetBan.cidr
+      }, subnetBan.reason);
+      banIp(subnetBan.cidr, { reason: subnetBan.reason, category: 'subnet', score: subnetBan.subTotal }).catch(() => {});
+      stats.blocked++;
+      return deny(req, res, config);
+    }
+
     if (wantsBan) {
       banIp(ip, {
-        reason: worst ? `${worst.label} (${worst.matched})` : 'Puan eşiği aşıldı',
-        category: worst?.category || 'custom',
+        reason: subnetBan ? subnetBan.reason : (worst ? `${worst.label} (${worst.matched})` : 'Puan eşiği aşıldı'),
+        category: subnetBan ? 'subnet' : (worst?.category || 'custom'),
         score: windowTotal
       }).catch(() => {});
       stats.blocked++;
@@ -792,6 +1167,19 @@ function createFirewall({ query, getIp, getClientInfo, onBan, isExempt } = {}) {
     rate.prune(now, config.rate_window_seconds * 1000);
     notFound.prune(now, config.notfound_window_seconds * 1000);
     scores.prune(now, config.score_window_seconds * 1000);
+    burst.prune(now, config.burst_window_seconds * 1000);
+    attackRate.prune(now, 2000);
+    subnetRate.prune(now, config.subnet_window_seconds * 1000);
+    subnetScores.prune(now, config.subnet_window_seconds * 1000);
+    authFailIp.prune(now, config.bruteforce_window_seconds * 1000);
+    authFailAccount.prune(now, config.bruteforce_window_seconds * 1000);
+    // Süresi dolmuş alt ağ üyeleri ve giriş kilitleri
+    const subCutoff = now - config.subnet_window_seconds * 1000;
+    for (const [key, members] of subnetMembers) {
+      for (const [addr, ts] of members) if (ts < subCutoff) members.delete(addr);
+      if (!members.size) subnetMembers.delete(key);
+    }
+    for (const [key, until] of loginLocks) if (until <= now) loginLocks.delete(key);
     if (banNoticeThrottle.size > 5000) banNoticeThrottle.clear();
     try {
       if (config.log_retention_days > 0) {
@@ -841,10 +1229,28 @@ function createFirewall({ query, getIp, getClientInfo, onBan, isExempt } = {}) {
     evaluate,
     isAllowed,
     normalizeIp,
+    subnetOf,
+    // Brute force — giriş uçlarından çağrılır
+    registerAuthFailure,
+    registerAuthSuccess,
+    loginBlocked,
     get config() { return state.config; },
     get rules() { return state.rules; },
     get bans() { return state.bans; },
-    get stats() { return { ...stats, queue: queue.length, bans: state.bans.size, rules: state.rules.length }; },
+    get underAttack() { return Date.now() < state.underAttackUntil; },
+    get stats() {
+      return {
+        ...stats,
+        queue: queue.length,
+        bans: state.bans.size + state.banPrefixes.length,
+        subnet_bans: state.banPrefixes.length,
+        rules: state.rules.length,
+        under_attack: Date.now() < state.underAttackUntil,
+        rps: currentRps(Date.now()),
+        tracked_subnets: subnetMembers.size,
+        login_locks: loginLocks.size
+      };
+    },
     CATEGORIES,
     DEFAULT_CONFIG,
     BUILTIN_RULES,

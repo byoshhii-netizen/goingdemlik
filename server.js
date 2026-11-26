@@ -2192,6 +2192,13 @@ app.post('/api/admin/auth/login', async (req, res) => {
 
   const username = String(req.body.username || '').trim();
   if (!username) return res.status(400).json({ error: 'Ana admin kullanıcı adı gerekli' });
+  const adminLoginIp = getIp(req);
+  const adminLoginLock = firewall.loginBlocked(adminLoginIp, `admin:${username.toLowerCase()}`);
+  if (adminLoginLock) {
+    const seconds = Math.max(1, Math.round((adminLoginLock.until - Date.now()) / 1000));
+    res.setHeader('Retry-After', String(seconds));
+    return res.status(429).json({ error: `Çok fazla başarısız deneme. ${Math.ceil(seconds / 60)} dakika sonra deneyin.`, retry_after: seconds });
+  }
   const { rows: settings } = await query("SELECT key, value FROM settings WHERE key IN ('admin_username','admin_password')");
   const config = Object.fromEntries(settings.map(row => [row.key, row.value]));
   const storedMasterPassword = String(config.admin_password || '').trim();
@@ -2210,8 +2217,10 @@ app.post('/api/admin/auth/login', async (req, res) => {
   );
   const user = users[0];
   if (!user || user.banned || !verifyPassword(password, user.password_hash)) {
+    try { firewall.registerAuthFailure(adminLoginIp, `admin:${username.toLowerCase()}`, req); } catch {}
     return res.status(401).json({ error: 'Yetkili bilgileri doğrulanamadı' });
   }
+  try { firewall.registerAuthSuccess(adminLoginIp, `admin:${username.toLowerCase()}`); } catch {}
   const { rows: permissionRows } = await query('SELECT * FROM admin_permissions WHERE user_id=$1', [user.id]);
   const permissions = permissionRows[0] || {};
   if (!hasAdminPanelAccess(permissions)) {
@@ -2869,13 +2878,26 @@ app.post('/api/auth/login', async (req, res) => {
     if (!login || !password) return res.status(400).json({ error: 'Bilgiler eksik' });
     const loginUsername = String(login).trim().replace(/^@/, '');
     const ip = getIp(req);
+    // Kaba kuvvet kilidi: IP veya hesap çok fazla başarısız denedi mi?
+    const loginLock = firewall.loginBlocked(ip, loginUsername);
+    if (loginLock) {
+      const seconds = Math.max(1, Math.round((loginLock.until - Date.now()) / 1000));
+      res.setHeader('Retry-After', String(seconds));
+      return res.status(429).json({
+        error: `Çok fazla başarısız giriş denemesi. Lütfen ${Math.ceil(seconds / 60)} dakika sonra tekrar deneyin.`,
+        retry_after: seconds
+      });
+    }
     // Süresi dolmuş hesapları temizle
     await purgeDeletedAccounts();
     const { rows: ipBan } = await query("SELECT id FROM users WHERE banned_ip=$1 AND ban_type='ip'", [ip]);
     if (ipBan.length) return res.status(403).json({ error: 'Bu IP adresi yasaklanmış' });
     const { rows } = await query('SELECT * FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1', [loginUsername]);
     const user = rows[0];
-    if (!user || !verifyPassword(password, user.password_hash)) return res.status(401).json({ error: 'Hatalı bilgiler' });
+    if (!user || !verifyPassword(password, user.password_hash)) {
+      try { firewall.registerAuthFailure(ip, loginUsername, req); } catch {}
+      return res.status(401).json({ error: 'Hatalı bilgiler' });
+    }
     if (needsRehash(user.password_hash)) {
       await query('UPDATE users SET password_hash=$1 WHERE id=$2', [hashPassword(password), user.id]);
     }
@@ -2903,6 +2925,7 @@ app.post('/api/auth/login', async (req, res) => {
       const challenge = await createTwoFactorChallenge(user);
       return res.json({ two_factor_required: true, ...challenge });
     }
+    try { firewall.registerAuthSuccess(ip, loginUsername); } catch {}
     await query('UPDATE users SET last_active=NOW(), ip=$1 WHERE id=$2', [ip, user.id]);
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
@@ -9973,6 +9996,72 @@ function firewallActor(req) {
   return req.adminUser?.username || req.adminUser?.name || 'admin';
 }
 
+// Bir IP listesini, o IP'den giriş yapmış KAYITLI kullanıcılarla eşleştirir.
+// login_events (giriş geçmişi) ve users.ip (son IP) üzerinden bakar. CIDR/blok
+// yasakları için (ör. "152.233.13.0/24") önekle eşleşen tüm hesapları getirir.
+// Dönen: { "<ip>": [ { user_id, username, avatar, is_admin, banned, last_seen } ] }
+async function lookupAccountsForIps(ips) {
+  const result = {};
+  const plain = [];
+  const cidrs = [];
+  for (const raw of ips) {
+    const ip = String(raw || '').trim();
+    if (!ip || result[ip]) continue;
+    result[ip] = [];
+    if (ip.includes('/') || ip.endsWith('*')) {
+      const pfx = ip.replace(/0\/24$/, '').replace(/::\/64$/, ':').replace(/\/\d+$/, '').replace(/\*$/, '');
+      cidrs.push({ ip, like: pfx + '%' });
+    } else {
+      plain.push(ip);
+    }
+  }
+  const push = (ip, row) => {
+    if (!result[ip]) result[ip] = [];
+    if (result[ip].length >= 25) return;
+    if (!result[ip].some(a => a.user_id === row.user_id)) {
+      result[ip].push({
+        user_id: row.user_id, username: row.username, avatar: row.avatar || '',
+        is_admin: Number(row.is_admin) === 1, banned: Number(row.banned) === 1,
+        last_seen: row.last_seen || null
+      });
+    }
+  };
+  try {
+    if (plain.length) {
+      const { rows } = await query(
+        `SELECT le.ip AS ip, u.id AS user_id, u.username, u.avatar, u.is_admin, u.banned, MAX(le.created_at) AS last_seen
+           FROM login_events le JOIN users u ON u.id = le.user_id
+          WHERE le.ip = ANY($1)
+          GROUP BY le.ip, u.id, u.username, u.avatar, u.is_admin, u.banned
+          ORDER BY last_seen DESC`,
+        [plain]
+      );
+      for (const row of rows) push(row.ip, row);
+      // Kullanıcının kayıtlı son IP'si (login_events temizlenmiş olsa bile)
+      const { rows: direct } = await query(
+        `SELECT ip, id AS user_id, username, avatar, is_admin, banned, last_active AS last_seen
+           FROM users WHERE ip = ANY($1)`,
+        [plain]
+      );
+      for (const row of direct) push(row.ip, row);
+    }
+    for (const { ip, like } of cidrs) {
+      const { rows } = await query(
+        `SELECT u.id AS user_id, u.username, u.avatar, u.is_admin, u.banned, MAX(le.created_at) AS last_seen
+           FROM login_events le JOIN users u ON u.id = le.user_id
+          WHERE le.ip LIKE $1
+          GROUP BY u.id, u.username, u.avatar, u.is_admin, u.banned
+          ORDER BY last_seen DESC LIMIT 25`,
+        [like]
+      );
+      for (const row of rows) push(ip, row);
+    }
+  } catch (error) {
+    console.error('[firewall] Kullanıcı eşleştirme hatası:', error.message);
+  }
+  return result;
+}
+
 // Ayarlar + kategori tanımları + canlı sayaçlar tek seferde
 app.get('/api/admin/firewall/config', adminMiddleware, async (req, res) => {
   res.json({
@@ -10026,6 +10115,35 @@ app.put('/api/admin/firewall/config', adminMiddleware, async (req, res) => {
     notfound_score: asInt(body.notfound_score, current.notfound_score, 0, 1000),
     honeypot_enabled: body.honeypot_enabled !== false,
     honeypot_paths: cleanList(body.honeypot_paths, 200, 100),
+    honeypot_action: ['ban', 'block', 'score'].includes(body.honeypot_action) ? body.honeypot_action : (current.honeypot_action || 'ban'),
+    honeypot_ignore_prefetch: body.honeypot_ignore_prefetch !== false,
+    honeypot_grace: asInt(body.honeypot_grace, current.honeypot_grace ?? 0, 0, 100),
+    honeypot_grace_window_seconds: asInt(body.honeypot_grace_window_seconds, current.honeypot_grace_window_seconds ?? 600, 10, 86400),
+    honeypot_fields: cleanList(body.honeypot_fields, 64, 50),
+    // Ani yük / DDoS
+    ddos_enabled: body.ddos_enabled !== false,
+    burst_window_seconds: asInt(body.burst_window_seconds, current.burst_window_seconds ?? 3, 1, 60),
+    burst_max_requests: asInt(body.burst_max_requests, current.burst_max_requests ?? 60, 5, 100000),
+    burst_score: asInt(body.burst_score, current.burst_score ?? 10, 0, 1000),
+    ddos_global_rps: asInt(body.ddos_global_rps, current.ddos_global_rps ?? 800, 0, 1000000),
+    ddos_under_attack_ip_rps: asInt(body.ddos_under_attack_ip_rps, current.ddos_under_attack_ip_rps ?? 15, 1, 100000),
+    ddos_under_attack_seconds: asInt(body.ddos_under_attack_seconds, current.ddos_under_attack_seconds ?? 120, 10, 3600),
+    // Alt ağ (subnet)
+    subnet_enabled: body.subnet_enabled !== false,
+    subnet_window_seconds: asInt(body.subnet_window_seconds, current.subnet_window_seconds ?? 600, 30, 86400),
+    subnet_distinct_ips: asInt(body.subnet_distinct_ips, current.subnet_distinct_ips ?? 4, 2, 1000),
+    subnet_score_threshold: asInt(body.subnet_score_threshold, current.subnet_score_threshold ?? 40, 1, 100000),
+    subnet_multiplier: asInt(body.subnet_multiplier, current.subnet_multiplier ?? 2, 1, 20),
+    subnet_ban_whole: body.subnet_ban_whole !== false,
+    subnet_rate_max: asInt(body.subnet_rate_max, current.subnet_rate_max ?? 600, 0, 1000000),
+    // Kaba kuvvet (brute force)
+    bruteforce_enabled: body.bruteforce_enabled !== false,
+    bruteforce_window_seconds: asInt(body.bruteforce_window_seconds, current.bruteforce_window_seconds ?? 900, 30, 86400),
+    bruteforce_ip_max: asInt(body.bruteforce_ip_max, current.bruteforce_ip_max ?? 10, 1, 10000),
+    bruteforce_account_max: asInt(body.bruteforce_account_max, current.bruteforce_account_max ?? 6, 1, 10000),
+    bruteforce_score: asInt(body.bruteforce_score, current.bruteforce_score ?? 6, 0, 1000),
+    bruteforce_lock_minutes: asInt(body.bruteforce_lock_minutes, current.bruteforce_lock_minutes ?? 30, 1, 10080),
+    bruteforce_ban: body.bruteforce_ban !== false,
     country_mode: ['off', 'allow', 'block'].includes(body.country_mode) ? body.country_mode : 'off',
     country_list: cleanList(body.country_list, 4, 250).map(entry => entry.toUpperCase()),
     skip_static: body.skip_static !== false,
@@ -10073,6 +10191,9 @@ app.get('/api/admin/firewall/events', adminMiddleware, async (req, res) => {
   values.push(limit);
   try {
     const { rows } = await query(`SELECT * FROM firewall_events ${where} ORDER BY id DESC LIMIT $${values.length}`, values);
+    // Her olayın IP'sine kayıtlı kullanıcı varsa iliştir
+    const accounts = await lookupAccountsForIps([...new Set(rows.map(r => r.ip))]);
+    for (const row of rows) row.accounts = accounts[row.ip] || [];
     res.json(rows);
   } catch (error) {
     console.error('[firewall] Olaylar okunamadı:', error.message);
@@ -10107,6 +10228,8 @@ app.get('/api/admin/firewall/stats', adminMiddleware, async (req, res) => {
                     COUNT(*) FILTER (WHERE active AND permanent)::int AS permanent,
                     COUNT(*)::int AS total FROM firewall_bans`)
     ]);
+    const ipAccounts = await lookupAccountsForIps(topIps.rows.map(r => r.ip));
+    for (const row of topIps.rows) row.accounts = ipAccounts[row.ip] || [];
     res.json({
       totals: totals.rows[0] || {},
       by_category: byCategory.rows,
@@ -10131,6 +10254,9 @@ app.get('/api/admin/firewall/bans', adminMiddleware, async (req, res) => {
       `SELECT * FROM firewall_bans ${onlyActive ? 'WHERE active=TRUE' : ''} ORDER BY created_at DESC LIMIT $1`,
       [limit]
     );
+    // Yasaklı IP'ye kayıtlı kullanıcı varsa göster (blok yasaklarında önekle)
+    const accounts = await lookupAccountsForIps([...new Set(rows.map(r => r.ip))]);
+    for (const row of rows) row.accounts = accounts[row.ip] || [];
     res.json(rows);
   } catch (error) {
     res.status(500).json({ error: 'Yasak listesi okunamadı.' });
@@ -10303,6 +10429,40 @@ app.post('/api/admin/firewall/purge', adminMiddleware, async (req, res) => {
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ error: 'Temizlenemedi.' });
+  }
+});
+
+// Tek bir IP'nin tam profili: kayıtlı hesaplar, yasak durumu, son olaylar
+app.get('/api/admin/firewall/ip/:ip', adminMiddleware, async (req, res) => {
+  const ip = firewall.normalizeIp(req.params.ip);
+  if (!ip) return res.status(400).json({ error: 'IP gerekli.' });
+  try {
+    const accountsMap = await lookupAccountsForIps([ip]);
+    const subnet = firewall.subnetOf(ip);
+    const [events, ban, counts, loginHistory] = await Promise.all([
+      query('SELECT * FROM firewall_events WHERE ip=$1 ORDER BY id DESC LIMIT 50', [ip]),
+      query('SELECT * FROM firewall_bans WHERE ip=$1 AND active=TRUE ORDER BY created_at DESC LIMIT 1', [ip]),
+      query(`SELECT COUNT(*)::int AS total,
+                    COUNT(*) FILTER (WHERE action IN ('blocked','banned'))::int AS blocked,
+                    (ARRAY_AGG(DISTINCT category))[1:8] AS categories,
+                    MIN(created_at) AS first_seen, MAX(created_at) AS last_seen
+             FROM firewall_events WHERE ip=$1`, [ip]),
+      query(`SELECT le.created_at, le.status, le.device, le.browser, le.location, u.username
+               FROM login_events le JOIN users u ON u.id=le.user_id
+              WHERE le.ip=$1 ORDER BY le.created_at DESC LIMIT 20`, [ip])
+    ]);
+    res.json({
+      ip,
+      subnet: subnet ? subnet.cidr : null,
+      accounts: accountsMap[ip] || [],
+      ban: ban.rows[0] || null,
+      stats: counts.rows[0] || {},
+      events: events.rows,
+      login_history: loginHistory.rows
+    });
+  } catch (error) {
+    console.error('[firewall] IP profili okunamadı:', error.message);
+    res.status(500).json({ error: 'IP profili okunamadı.' });
   }
 });
 
