@@ -3237,6 +3237,10 @@ body.app-lock-active { overflow: hidden; }
   gap: var(--cg-ex-gap) !important;
   padding: 0 !important;
 }
+/* Daha çok foto sıralansın: geniş ekranlarda sütun sayısını artır (mobil 3 kalır) */
+@media (min-width: 700px)  { .media-explore-page #media-explore-feed { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; } }
+@media (min-width: 1100px) { .media-explore-page #media-explore-feed { grid-template-columns: repeat(5, minmax(0, 1fr)) !important; } }
+@media (min-width: 1500px) { .media-explore-page #media-explore-feed { grid-template-columns: repeat(6, minmax(0, 1fr)) !important; } }
 .media-explore-page #media-explore-feed > *:not(.media-explore-result) { grid-column: 1 / -1; }
 .media-explore-page #media-explore-feed > .media-explore-result {
   display: block !important;
@@ -4279,3 +4283,24 @@ input[type="range"] { min-height: 0 !important; }
   color: var(--accent-red2, var(--text-secondary));
   letter-spacing: .1px;
 }
+
+/* ============================================================================
+   GRUP SOHBETİ = DM SOHBETİ GÖRÜNÜMÜ
+   Grup mesajları artık DM balon yapısını (.dm-msg-wrap) kullanır; böylece
+   tasarım DM ile birebir aynıdır. Aşağıdaki kurallar yalnızca grup kabında
+   (.chat-container) geçerlidir ve çoklu gönderenli grup sohbetine uyarlar:
+   art arda aynı kişiden gelen "devam" mesajlarında avatar ve ad gizlenir,
+   hizalama korunur.
+   ============================================================================ */
+.chat-container .chat-messages { gap: 2px !important; }
+.chat-container .dm-msg-wrap.dm-continued .dm-msg-avatar-link { visibility: hidden; }
+.chat-container .dm-msg-wrap.dm-continued .dm-msg-sender { display: none; }
+.chat-container .dm-msg-wrap.dm-continued { margin-top: 1px; }
+/* Gönderen adı grubun renkli adıyla uyumlu, DM'deki boyut/konumda */
+.chat-container .dm-msg-sender { font-weight: 700; font-size: 12.5px; text-decoration: none; margin-bottom: 2px; display: inline-block; }
+/* Kendi mesajın sağa yaslansın (DM ile aynı) */
+.chat-container .dm-msg-wrap.dm-own { margin-left: auto; }
+
+/* Hızlı kayıt admin'den kapatıldığında "Hızlıca Doldur" butonunu ve notunu gizle */
+body.quick-register-hidden .quick-register-button,
+body.quick-register-hidden .quick-register-hint { display: none !important; }

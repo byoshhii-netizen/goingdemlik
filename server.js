@@ -1499,15 +1499,19 @@ function registerCallHandlers(socket) {
   });
 }
 
-function emitDirectMessage(conversationId, sender, recipient, message) {
-  io.to([`user:${sender.id}`, `user:${recipient.id}`]).emit('dm:message', {
+function emitDirectMessage(conversationId, sender, recipient, message, options = {}) {
+  // Sessiz: alıcı gönedereni engellemiş. Mesaj yalnızca gönderenin kendi
+  // cihazlarına yansır; alıcıya ne anlık iletim ne bildirim ne push gider.
+  const silent = options.silent === true;
+  const targets = silent ? [`user:${sender.id}`] : [`user:${sender.id}`, `user:${recipient.id}`];
+  io.to(targets).emit('dm:message', {
     conversationId,
     messageId: message.id,
     senderId: sender.id,
     usernames: [sender.username, recipient.username],
     preview: message.content || (message.voice_url ? '🎤 Sesli mesaj' : message.image_url ? 'Fotoğraf' : message.shared_gif_url ? 'GIF' : message.shared_song_id ? 'Müzik' : 'Yeni mesaj')
   });
-  if (String(sender.id) !== String(recipient.id)) {
+  if (!silent && String(sender.id) !== String(recipient.id)) {
     query(`SELECT CASE WHEN user1_id=$2 THEN
         (COALESCE(mute_forever_user1,0)=1 OR (muted_until_user1 IS NOT NULL AND muted_until_user1>NOW()))
       ELSE (COALESCE(mute_forever_user2,0)=1 OR (muted_until_user2 IS NOT NULL AND muted_until_user2>NOW()))
@@ -2700,6 +2704,11 @@ function quickRegisterUsernamePart(value) {
 
 async function createQuickRegistrationSuggestion(req, res) {
   try {
+    // Admin "Hızlı kayıt" anahtarını kapattıysa bu özellik tamamen gizlidir.
+    const { rows: qrRows } = await query("SELECT value FROM settings WHERE key='quick_registration_enabled'");
+    if (qrRows.length && qrRows[0].value === '0') {
+      return res.status(403).json({ error: 'Hızlı kayıt şu anda kapalı.', code: 'QUICK_REGISTRATION_DISABLED' });
+    }
     const firstImageResponse = await fetch(`https://cataas.com/cat?json=true&request=${randomUUID()}`, {
       signal: AbortSignal.timeout(7000),
       headers: { Accept: 'application/json' }
@@ -6325,6 +6334,14 @@ async function getBlockForViewer(viewerId, ownerId) {
   const { rows } = await query(`SELECT blocker_id,blocked_id,hide_until,fake_profile,created_at
     FROM blocks WHERE blocker_id=$1 AND blocked_id=$2`, [ownerId, viewerId]);
   return rows[0] || null;
+}
+
+// Yönlü engel: blockerId, blockedId'yi engellemiş mi? (tek yön)
+// WhatsApp tarzı sessiz engelleme için yönü bilmek şart: engellenen taraf hiçbir
+// açık uyarı görmemeli, engelleyen taraf ise "engeli kaldır" görür.
+async function directedBlock(blockerId, blockedId) {
+  const { rows } = await query('SELECT 1 FROM blocks WHERE blocker_id=$1 AND blocked_id=$2 LIMIT 1', [blockerId, blockedId]);
+  return rows.length > 0;
 }
 
 async function blockHidesContent(viewerId, ownerId) {
@@ -12264,7 +12281,7 @@ app.get('/api/settings/public', async (req, res) => {
   const keys = [
     'site_name','site_description','primary_color','background_color','dark_theme_style','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','homepage_sections_desktop','profile_tabs','footer_copyright_text',
-    'first_visit_auth','mobile_home_auth_required','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
+    'first_visit_auth','mobile_home_auth_required','quick_registration_enabled','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
     'photo_song_clip_seconds','music_page_tagline','level_system_enabled','badge_system_enabled','other_songs_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
     'newspaper_flag_url','newspaper_background_url','loading_screen_title','loading_screen_tagline','loading_screen_status','default_avatar_url','default_avatar_size',
     'dm_wallpaper_enabled','dm_wallpaper_url','dm_wallpaper_opacity','dm_wallpaper_size','dm_wallpaper_tint',
@@ -14372,8 +14389,14 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
+  // WhatsApp tarzı sessiz engelleme:
+  //  • BEN onu engellediysem → "engeli kaldır" ekranı (mevcut davranış).
+  //  • O beni engellediyse → HİÇBİR uyarı gösterme; sohbet normal açılsın.
+  //    (Engellendiğini fark etmesin; mesaj yazabilir ama karşıya iletilmez.)
   if (String(other.id) !== String(uid)) {
-    if (await getBlockBetween(uid, other.id)) return res.status(403).json({ error: 'Engellenen kullanıcılarla mesajlaşamazsınız. Mesaj göndermek için önce engeli kaldırın.' });
+    if (await directedBlock(uid, other.id)) {
+      return res.status(403).json({ error: 'Engellenen kullanıcılarla mesajlaşamazsınız. Mesaj göndermek için önce engeli kaldırın.', blocked_by_me: true });
+    }
     if (!(await maySendDm(uid, other.id))) return res.status(403).json({ error: 'Bu kullanıcı yalnızca belirli kişilerin kendisine mesaj göndermesine izin veriyor.' });
   }
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
@@ -15238,12 +15261,16 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
-  const [block, canSend] = await Promise.all([
-    getBlockBetween(uid, other.id),
+  const [iBlockedThem, theyBlockedMe, canSend] = await Promise.all([
+    directedBlock(uid, other.id),      // ben onu engelledim
+    directedBlock(other.id, uid),      // o beni engelledi
     maySendDm(uid, other.id, other.dm_message_permission)
   ]);
-  if (block) return res.status(403).json({ error: 'Engellenen kullanıcılarla mesajlaşamazsınız. Mesaj göndermek için önce engeli kaldırın.' });
+  // Ben onu engellediysem göndermeden önce engeli kaldırmam gerekir.
+  if (iBlockedThem) return res.status(403).json({ error: 'Engellenen kullanıcılarla mesajlaşamazsınız. Mesaj göndermek için önce engeli kaldırın.', blocked_by_me: true });
   if (!canSend) return res.status(403).json({ error: 'Bu kullanıcı yalnızca belirli kişilerin kendisine mesaj göndermesine izin veriyor.' });
+  // O beni engellediyse: mesaj sessizce kabul edilir (gönderen kendi tarafında
+  // görür) ama karşıya ne iletilir ne bildirilir — WhatsApp'taki gibi.
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
   let { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
   if (!convRows.length) {
@@ -15388,13 +15415,19 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   if (shared_forum_id) postInsertTasks.push(query('UPDATE forums SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_forum_id]));
   if (shared_book_id) postInsertTasks.push(query('UPDATE books SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_book_id]));
   if (shared_newspaper_id) postInsertTasks.push(query('UPDATE newspapers SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_newspaper_id]));
+  // Sessiz engelleme: mesajı engelleyenin görünümünden gizle (mevcut
+  // deleted_by_receiver filtresi sayesinde engelleyen onu hiç görmez; gönderen
+  // kendi tarafında görmeye devam eder).
+  if (theyBlockedMe) {
+    await query('UPDATE dm_messages SET deleted_by_receiver=1, deleted_by_receiver_at=COALESCE(deleted_by_receiver_at,NOW()) WHERE id=$1', [msgRows[0].id]);
+  }
   const [, { rows: full }] = await Promise.all(postInsertTasks);
-  if (content?.trim()) {
+  if (content?.trim() && !theyBlockedMe) {
     parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username)
       .catch(error => console.error('DM mention notification failed:', error.message));
   }
   const sentMessage = full[0];
-  emitDirectMessage(conv.id, req.user, other, imageViewLimit > 0 ? { ...sentMessage, image_url: '', image_urls: [] } : sentMessage);
+  emitDirectMessage(conv.id, req.user, other, imageViewLimit > 0 ? { ...sentMessage, image_url: '', image_urls: [] } : sentMessage, { silent: theyBlockedMe });
   res.json(sentMessage);
 });
 

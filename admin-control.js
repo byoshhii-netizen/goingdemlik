@@ -174,6 +174,7 @@ const SWITCHES = [
   { key: 'registration_closed', group: 'Acil durum', label: 'Yeni kayıtları kapat', hint: 'Kayıt formu çalışmaz; mevcut üyeler giriş yapabilir.', danger: true },
   { key: 'first_visit_auth', group: 'Erişim', label: 'Siteyi görmek için giriş zorunlu', hint: 'Giriş yapmayan ziyaretçiler kayıt ekranına yönlenir.' },
   { key: 'mobile_home_auth_required', group: 'Erişim', label: 'Mobil ana sayfa için giriş zorunlu' },
+  { key: 'quick_registration_enabled', group: 'Erişim', label: 'Hızlı kayıt (Hızlıca Doldur)', hint: 'Açıkken kayıt ekranında “Hızlıca Doldur” görünür; kapatılırsa gizlenir.', defaultOn: true },
   { key: 'route_protection_enabled', group: 'Erişim', label: 'Route koruması', hint: 'Tanımlı hassas yolları gizler ve yönlendirir.' },
   { key: 'reals_maintenance_enabled', group: 'Reals', label: 'Reals bakım modu', hint: 'Açıkken kimse Reals yükleyemez.', danger: true },
   { key: 'reals_in_media_enabled', group: 'Reals', label: 'Reals medya akışında görünsün', defaultOn: true },

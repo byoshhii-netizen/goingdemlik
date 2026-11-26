@@ -3768,7 +3768,7 @@ function handleRealtimeDmReaction(event) {
 
 function handleRealtimeGroupReaction(event) {
   if (!event?.messageId || !Array.isArray(event.reactions)) return;
-  const row = document.querySelector(`.chat-msg[data-message-id="${CSS.escape(String(event.messageId))}"]`);
+  const row = document.querySelector(`.dm-msg-wrap[data-message-id="${CSS.escape(String(event.messageId))}"]`);
   if (row) updateDmMessageReactions(row, event.reactions);
 }
 
@@ -9400,7 +9400,7 @@ async function renderGroupDetail(app, slug) {
   $('#group-reply-cancel')?.addEventListener('click', clearGroupReply);
   if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
   const chatSignature = list => list.map(message => [message.id, message.content || '', message.image_url || '', JSON.stringify(message.image_urls || []), message.shared_gif_url || '', message.shared_song_id || '', message.edited_at || '', JSON.stringify(message.reactions || []), message.deleted_for_me ? 1 : 0].join(':')).join('|');
-  const messageIdToRow = id => chatEl?.querySelector(`.chat-msg[data-message-id="${CSS.escape(String(id))}"]`);
+  const messageIdToRow = id => chatEl?.querySelector(`.dm-msg-wrap[data-message-id="${CSS.escape(String(id))}"]`);
   const getChatSelectionCount = () => groupChatSelection.size;
   const updateSelectionToolbar = () => {
     const selected = [...groupChatSelection];
@@ -9423,11 +9423,9 @@ async function renderGroupDetail(app, slug) {
   const clearChatSelection = () => {
     groupChatSelection.clear();
     groupChatSelectionMode = false;
-    document.querySelectorAll('.chat-msg-select').forEach(box => {
-      box.checked = false;
-      box.style.display = 'none';
-      box.closest('.chat-msg')?.classList.remove('selected');
-    });
+    chatEl?.querySelectorAll('.dm-msg-cb-wrap').forEach(wrap => { wrap.style.display = 'none'; });
+    chatEl?.querySelectorAll('.chat-msg-select').forEach(box => { box.checked = false; });
+    chatEl?.querySelectorAll('.dm-msg-wrap.dm-msg-selected').forEach(row => row.classList.remove('dm-msg-selected'));
     updateSelectionToolbar();
   };
   const selectGroupMessage = id => {
@@ -9436,19 +9434,17 @@ async function renderGroupDetail(app, slug) {
     groupChatSelectionMode = true;
     groupChatSelection.add(key);
     const row = messageIdToRow(key);
-    row?.classList.add('selected');
+    row?.classList.add('dm-msg-selected');
     const checkbox = row?.querySelector('.chat-msg-select');
-    if (checkbox) {
-      checkbox.style.display = '';
-      checkbox.checked = true;
-    }
-    document.querySelectorAll('.chat-msg-select').forEach(box => { box.style.display = ''; });
+    if (checkbox) checkbox.checked = true;
+    // Seçim modunda tüm onay kutularını göster (DM'deki gibi)
+    chatEl?.querySelectorAll('.dm-msg-cb-wrap').forEach(wrap => { wrap.style.display = 'flex'; });
     updateSelectionToolbar();
   };
-  installMessageSelectionGestures(chatEl, '.chat-msg', selectGroupMessage, '.group-message-image-open');
+  installMessageSelectionGestures(chatEl, '.dm-msg-wrap', selectGroupMessage, '.group-message-image-open');
   chatEl.addEventListener('contextmenu', event => {
     if (!(event.target instanceof Element)) return;
-    const row = event.target.closest('.chat-msg');
+    const row = event.target.closest('.dm-msg-wrap');
     const menuButton = row?.querySelector('.msg-menu-trigger');
     if (!row || !menuButton) return;
     event.preventDefault();
@@ -9457,7 +9453,7 @@ async function renderGroupDetail(app, slug) {
   installMessageReplySwipeGesture(chatEl, row => {
     const message = messages.find(item => String(item.id) === String(row.dataset.messageId));
     startGroupReply(message);
-  }, { rowSelector: '.chat-msg', isSelecting: () => groupChatSelectionMode });
+  }, { rowSelector: '.dm-msg-wrap', isSelecting: () => groupChatSelectionMode });
 
   const toolbar = document.createElement('div');
   toolbar.id = 'chat-selection-toolbar';
@@ -9483,12 +9479,12 @@ async function renderGroupDetail(app, slug) {
     const ids = messages.filter(msg => !msg.deleted_for_me).map(msg => String(msg.id));
     groupChatSelection = new Set(ids);
     groupChatSelectionMode = true;
-    document.querySelectorAll('.chat-msg-select').forEach(box => {
-      box.style.display = '';
+    chatEl?.querySelectorAll('.dm-msg-cb-wrap').forEach(wrap => { wrap.style.display = 'flex'; });
+    chatEl?.querySelectorAll('.chat-msg-select').forEach(box => {
       const id = box.dataset.id;
       const checked = ids.includes(String(id));
       box.checked = checked;
-      box.closest('.chat-msg')?.classList.toggle('selected', checked);
+      box.closest('.dm-msg-wrap')?.classList.toggle('dm-msg-selected', checked);
     });
     updateSelectionToolbar();
   });
@@ -9649,7 +9645,7 @@ async function renderGroupDetail(app, slug) {
           await triggerGroupMessageNotification(group.name, senderName, preview);
         }
         chatEl2.innerHTML = newMsgs.map(m => chatMsgHTML(m, window._chatCanMod, !!canSend)).join('');
-        newest.forEach(message => animateMessageEntry(chatEl2.querySelector(`.chat-msg[data-message-id="${CSS.escape(String(message.id))}"]`)));
+        newest.forEach(message => animateMessageEntry(chatEl2.querySelector(`.dm-msg-wrap[data-message-id="${CSS.escape(String(message.id))}"]`)));
         enhanceLinkPreviews(chatEl2);
         lastChatSignature = chatSignature(newMsgs);
         lastId = Math.max(lastId, ...newMsgs.map(m => Number(m.id)));
@@ -9825,7 +9821,7 @@ async function renderGroupDetail(app, slug) {
         const holder = document.createElement('div');
         holder.innerHTML = window.CigCigVoice.pendingBubbleHTML(recording.duration);
         const pendingRow = holder.firstElementChild;
-        pendingRow.classList.add('chat-msg', 'own');
+        pendingRow.classList.add('dm-msg-wrap', 'dm-own');
         list.appendChild(pendingRow);
         list.scrollTop = list.scrollHeight;
         const voiceEl = pendingRow.querySelector('.cg-voice');
@@ -9936,7 +9932,7 @@ async function renderGroupDetail(app, slug) {
   groupMessagesEl?.addEventListener('pointerdown', event => {
     if (event.pointerType !== 'touch') return;
     const pill = event.target.closest('.dm-reaction-pill');
-    const row = pill?.closest('.chat-msg');
+    const row = pill?.closest('.dm-msg-wrap');
     if (!pill || !row) return;
     groupReactionPressStart = { x: event.clientX, y: event.clientY };
     groupReactionPressTimer = window.setTimeout(() => {
@@ -9958,7 +9954,7 @@ async function renderGroupDetail(app, slug) {
   groupMessagesEl?.addEventListener('click', async e => {
     const imageButton = e.target.closest('.group-message-image-open');
     if (imageButton) {
-      const messageRow = imageButton.closest('.chat-msg');
+      const messageRow = imageButton.closest('.dm-msg-wrap');
       const imageUrls = [...(messageRow?.querySelectorAll('.group-message-image-open') || [])]
         .map(button => button.dataset.imageUrl)
         .filter(Boolean);
@@ -9971,7 +9967,7 @@ async function renderGroupDetail(app, slug) {
         suppressGroupReactionClickUntil = 0;
         return;
       }
-      const row = reactionPill.closest('.chat-msg');
+      const row = reactionPill.closest('.dm-msg-wrap');
       if (!row || reactionPill.disabled) return;
       reactionPill.disabled = true;
       try {
@@ -9997,7 +9993,7 @@ async function renderGroupDetail(app, slug) {
     const edit = e.target.closest('.edit-msg');
     const msgToggle = e.target.closest('.msg-menu-trigger');
     const selectBox = e.target.closest('.chat-msg-select');
-    const chatRow = e.target.closest('.chat-msg');
+    const chatRow = e.target.closest('.dm-msg-wrap');
 
     if (reply) {
       const message = messages.find(item => String(item.id) === String(reply.dataset.id));
@@ -10013,6 +10009,7 @@ async function renderGroupDetail(app, slug) {
       const menu = document.createElement('div');
       menu.className = 'msg-menu-popover';
       menu.innerHTML = `
+        ${currentUser && canSend ? `<button class="msg-menu-item" data-action="reply" data-id="${msgId}"><i class="fas fa-reply"></i> Yanıtla</button>` : ''}
         ${currentUser ? `<button class="msg-menu-item" data-action="react" data-id="${msgId}"><i class="fas fa-face-smile"></i> Emoji tepkisi ekle</button>` : ''}
         <button class="msg-menu-item" data-action="select" data-id="${msgId}"><i class="fas fa-check-square"></i> Seç</button>
         ${currentUser && isOwn ? `<button class="msg-menu-item" data-action="edit" data-id="${msgId}"><i class="fas fa-pen"></i> Düzenle</button>` : ''}
@@ -10031,7 +10028,7 @@ async function renderGroupDetail(app, slug) {
           if (action === 'react') {
             showDmReactionPicker(msgToggle, id, {
               endpoint: `/group/${groupSlugPath}/messages/${encodeURIComponent(id)}/reactions`,
-              rowSelector: `.chat-msg[data-message-id="${CSS.escape(String(id))}"]`
+              rowSelector: `.dm-msg-wrap[data-message-id="${CSS.escape(String(id))}"]`
             });
           } else if (action === 'reply') {
             startGroupReply(messages.find(message => String(message.id) === String(id)));
@@ -10042,8 +10039,8 @@ async function renderGroupDetail(app, slug) {
             if (target) target.click();
           } else if (action === 'delete-me') {
             await api('/group/' + groupSlugPath + '/messages/' + id, { method: 'DELETE' });
-            const row = document.querySelector(`.chat-msg[data-message-id="${CSS.escape(id)}"]`);
-            if (row) row.outerHTML = '<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>';
+            const row = document.querySelector(`.dm-msg-wrap[data-message-id="${CSS.escape(id)}"]`);
+            if (row) row.outerHTML = '<div class="dm-msg-wrap deleted-for-me"><div class="dm-msg-content"><div class="dm-msg-bubble" style="font-style:italic;opacity:.6"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>';
           }
         } catch (err) { toast(err.message, 'error'); }
         closeOpenMessageMenu();
@@ -10060,9 +10057,9 @@ async function renderGroupDetail(app, slug) {
     if (selectBox) {
       const id = String(selectBox.dataset.id);
       const checked = selectBox.checked;
-      const row = selectBox.closest('.chat-msg');
+      const row = selectBox.closest('.dm-msg-wrap');
       if (checked) groupChatSelection.add(id); else groupChatSelection.delete(id);
-      row?.classList.toggle('selected', checked);
+      row?.classList.toggle('dm-msg-selected', checked);
       groupChatSelectionMode = true;
       updateSelectionToolbar();
       return;
@@ -10074,7 +10071,7 @@ async function renderGroupDetail(app, slug) {
       if (groupChatSelectionMode || isSelected) {
         groupChatSelectionMode = true;
         if (isSelected) groupChatSelection.delete(id); else groupChatSelection.add(id);
-        chatRow.classList.toggle('selected', !isSelected);
+        chatRow.classList.toggle('dm-msg-selected', !isSelected);
         const checkbox = chatRow.querySelector('.chat-msg-select');
         if (checkbox) checkbox.checked = !isSelected;
         updateSelectionToolbar();
@@ -10083,7 +10080,7 @@ async function renderGroupDetail(app, slug) {
     }
 
     if (edit) {
-      const message = edit.closest('.chat-msg');
+      const message = edit.closest('.dm-msg-wrap');
       showModal('Mesajı düzenle', `<div class="form-group"><label>Mesaj</label><textarea id="edit-group-message" rows="5">${escHtml(edit.dataset.content || '')}</textarea></div><button class="btn btn-primary" id="save-group-message-edit" style="width:100%">Kaydet</button><div id="edit-group-message-error" class="form-error mt-4"></div>`);
       $('#save-group-message-edit').addEventListener('click', async () => {
         try {         const updated = await api('/group/' + groupSlugPath + '/messages/' + edit.dataset.id, { method: 'PUT', body: JSON.stringify({ content: $('#edit-group-message').value }) }); message.outerHTML = chatMsgHTML({ ...updated, reactions: messages.find(item => String(item.id) === String(updated.id))?.reactions || [] }, isOwner || isMod, !!canSend); hideModal(); toast('Mesaj düzenlendi'); } catch (error) { $('#edit-group-message-error').textContent = error.message; }
@@ -10091,7 +10088,7 @@ async function renderGroupDetail(app, slug) {
       return;
     }
     if (!del) return;
-    try { await api('/group/' + groupSlugPath + '/messages/' + del.dataset.id, { method: 'DELETE' }); const row = del.closest('.chat-msg'); if (row) row.outerHTML = '<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>'; } catch (e) { toast(e.message, 'error'); }
+    try { await api('/group/' + groupSlugPath + '/messages/' + del.dataset.id, { method: 'DELETE' }); const row = del.closest('.dm-msg-wrap'); if (row) row.outerHTML = '<div class="dm-msg-wrap deleted-for-me"><div class="dm-msg-content"><div class="dm-msg-bubble" style="font-style:italic;opacity:.6"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>'; } catch (e) { toast(e.message, 'error'); }
   });
 
   $('#join-requests-btn')?.addEventListener('click', async () => {
@@ -10321,44 +10318,70 @@ async function renderGroupDetail(app, slug) {
 
 }
 
-function chatMsgHTML(m, canModerate = false, canReply = false) {
+// Grup mesaj balonu — DM sohbetiyle BİREBİR aynı görünüm (.dm-msg-wrap yapısı
+// ve CSS'i). Çoklu gönderen için gönderen adı/avatarı gösterilir; art arda ayni
+// kişiden gelen mesajlarda (devam) avatar/ad gizlenir. İşlevsel kancalar
+// (data-message-id, .msg-menu-trigger, .chat-msg-select, .group-message-image-open,
+// .edit-msg, data-reactions, data-user-id) grup olay işleyicileri için korunur.
+function chatMsgHTML(m, canModerate = false, canReply = false, previousMessage = null) {
   const isOwn = currentUser && String(currentUser.id) === String(m.user_id);
-  if (m.deleted_for_me) return `<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>`;
+  if (m.deleted_for_me) return `<div class="dm-msg-wrap deleted-for-me" data-message-id="${m.id}" data-id="${m.id}"><div class="dm-msg-content"><div class="dm-msg-bubble" style="font-style:italic;opacity:.6"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>`;
   const profileLink = m.username ? profileRoute(m.username) : '#';
   const displayName = m.username || 'Silinmiş kullanıcı';
-  const avatar = hasUsableAvatar(m) ? `<img src="${escHtml(m.avatar)}" class="chat-msg-avatar" alt="" />` : `<div class="chat-msg-avatar avatar-placeholder"><i class="fas fa-user"></i></div>`;
-  const canAction = currentUser && (isOwn || canModerate);
+  const senderId = String(m.user_id ?? '');
+  const messageTime = Date.parse(m.created_at);
+  const previousTime = Date.parse(previousMessage?.created_at);
+  const isContinued = previousMessage
+    && String(previousMessage.user_id ?? '') === senderId
+    && Number.isFinite(messageTime) && Number.isFinite(previousTime)
+    && Math.abs(messageTime - previousTime) <= 5 * 60 * 1000;
   let imageUrls = m.image_urls;
   if (typeof imageUrls === 'string') {
     try { imageUrls = JSON.parse(imageUrls); } catch { imageUrls = []; }
   }
   imageUrls = Array.isArray(imageUrls) ? imageUrls.filter(url => typeof url === 'string' && url.trim()) : [];
   if (!imageUrls.length && m.image_url) imageUrls = [m.image_url];
-  const selectBox = `<input type="checkbox" class="chat-msg-select" data-id="${m.id}" aria-label="Mesajı seç" style="display:${groupChatSelectionMode ? 'block' : 'none'}" ${groupChatSelection.has(String(m.id)) ? 'checked' : ''} />`;
-  return `<div class="chat-msg ${isOwn ? 'own' : ''}${groupChatSelection.has(String(m.id)) ? ' selected' : ''}" data-message-id="${m.id}" data-user-id="${escHtml(String(m.user_id ?? ''))}" data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
-    ${selectBox}
-    <a href="${profileLink}" data-link class="chat-msg-profile" aria-label="${escHtml(m.username || 'Silindi')} profili">${avatar}</a>
-    <div class="chat-msg-body">
-      <div class="chat-msg-meta">
-        ${isOwn ? '' : m.username ? `<a href="${profileLink}" data-link class="chat-msg-name" style="${m.name_color ? `color:${escHtml(m.name_color)}` : ''}">${escHtml(displayName)}</a>` : `<span class="chat-msg-name" style="opacity:.65">${escHtml(displayName)}</span>`}
-        <span class="chat-msg-time">${timeAgo(m.created_at)}</span>
-        ${m.edited_at ? '<span class="chat-msg-edited" title="Bu mesaj düzenlendi"><i class="fas fa-pen"></i></span>' : ''}
-        ${currentUser ? `<button class="btn btn-ghost msg-menu-trigger" data-id="${m.id}" title="Mesaj seçenekleri" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-ellipsis-v"></i></button>` : ''}
-      </div>
-      ${m.voice_url && window.CigCigVoice ? window.CigCigVoice.bubbleHTML(m, isOwn) : ''}
-      ${m.reply_to_id && (m.reply_content || m.reply_image_url) ? `<div class="chat-reply-preview"><span>${escHtml(m.reply_username || 'Silinmiş kullanıcı')}</span><div>${escHtml((m.reply_content || 'Fotoğraf').slice(0, 100))}</div></div>` : ''}
-      ${m.content ? `<div class="chat-msg-text">${renderContent(m.content)}</div>` : ''}
-      ${imageUrls.length ? `<div class="group-message-image-grid" data-image-count="${imageUrls.length}">${imageUrls.map((url, index) => `<button type="button" class="group-message-image-open" data-image-url="${escHtml(url)}" aria-label="Fotoğrafı görüntüle"><img src="${escHtml(url)}" class="chat-msg-img" alt="Mesaj fotoğrafı ${index + 1}" loading="lazy" decoding="async" /></button>`).join('')}</div>` : ''}
-      ${m.shared_gif_url ? `<img class="dm-shared-gif group-message-gif" src="${escHtml(m.shared_gif_url)}" alt="GIF" loading="lazy" decoding="async" />` : ''}
-      ${m.shared_song_id ? `<div class="dm-shared-song">
-        <span class="dm-shared-song-art">${m.song_cover_url ? `<img src="${escHtml(m.song_cover_url)}" alt="" loading="lazy" />` : '<i class="fas fa-music" aria-hidden="true"></i>'}</span>
-        <span class="dm-shared-song-info"><strong>${escHtml(m.song_title || 'Paylaşılan müzik')}</strong><small>${escHtml(m.song_artist || 'CigCig Müzik')}</small></span>
-        ${m.song_audio_url ? `<button type="button" class="group-shared-song-play" data-audio-url="${escHtml(m.song_audio_url)}" data-song-slug="${escHtml(m.song_slug || '')}" data-start-seconds="${Number(m.song_start_seconds) || 0}" aria-label="Müziği oynat" title="Oynat"><i class="fas fa-play" aria-hidden="true"></i></button>` : '<i class="fas fa-music dm-shared-song-note" aria-hidden="true"></i>'}
-      </div>` : ''}
-      ${m.shared_song_id && m.song_slug ? `<a class="dm-shared-song-continue" href="/muzik/${encodeURIComponent(m.song_slug)}?start=${Number(m.song_start_seconds) || 0}&autoplay=1" data-link hidden><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i><span>Devamını müziklerde dinle</span></a>` : ''}
-      ${dmMessageReactionsHTML(m.reactions, currentUser?.id)}
-      <button class="edit-msg" data-id="${m.id}" data-content="${escHtml(m.content || '')}" style="display:none"></button>
+  const avatarMarkup = hasUsableAvatar(m)
+    ? `<img src="${escHtml(m.avatar)}" class="avatar-sm" style="flex-shrink:0" alt="" />`
+    : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`;
+
+  const bubbleContent = `${m.voice_url && window.CigCigVoice ? window.CigCigVoice.bubbleHTML(m, isOwn) : ''}
+    ${imageUrls.length ? `<div class="group-message-image-grid dm-message-image-grid" data-image-count="${imageUrls.length}">${imageUrls.map((url, index) => `<button type="button" class="group-message-image-open" data-image-url="${escHtml(url)}" aria-label="Fotoğrafı görüntüle"><img src="${escHtml(url)}" class="chat-msg-img dm-message-image" alt="Mesaj fotoğrafı ${index + 1}" loading="lazy" decoding="async" /></button>`).join('')}</div>` : ''}
+    ${m.shared_gif_url ? `<img class="dm-shared-gif" src="${escHtml(m.shared_gif_url)}" alt="GIF" loading="lazy" decoding="async" />` : ''}
+    ${m.shared_song_id ? `<div class="dm-shared-song">
+      <span class="dm-shared-song-art">${m.song_cover_url ? `<img src="${escHtml(m.song_cover_url)}" alt="" loading="lazy" />` : '<i class="fas fa-music" aria-hidden="true"></i>'}</span>
+      <span class="dm-shared-song-info"><strong>${escHtml(m.song_title || 'Paylaşılan müzik')}</strong><small>${escHtml(m.song_artist || 'CigCig Müzik')}</small></span>
+      ${m.song_audio_url ? `<button type="button" class="group-shared-song-play" data-audio-url="${escHtml(m.song_audio_url)}" data-song-slug="${escHtml(m.song_slug || '')}" data-start-seconds="${Number(m.song_start_seconds) || 0}" aria-label="Müziği oynat" title="Oynat"><i class="fas fa-play" aria-hidden="true"></i></button>` : '<i class="fas fa-music dm-shared-song-note" aria-hidden="true"></i>'}
+    </div>` : ''}
+    ${m.shared_song_id && m.song_slug ? `<a class="dm-shared-song-continue" href="/muzik/${encodeURIComponent(m.song_slug)}?start=${Number(m.song_start_seconds) || 0}&autoplay=1" data-link hidden><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i><span>Devamını müziklerde dinle</span></a>` : ''}
+    ${m.content ? `<span>${renderContent(m.content)}</span>` : ''}
+    ${dmMessageReactionsHTML(m.reactions, currentUser?.id)}
+    ${m.edited_at ? '<i class="fas fa-pen dm-msg-edited-mark" title="Düzenlendi"></i>' : ''}`;
+
+  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${m.voice_url ? ' dm-has-voice' : ''}${groupChatSelection.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-message-id="${m.id}" data-id="${m.id}" data-user-id="${escHtml(senderId)}" data-content="${escHtml(m.content || '')}" data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
+    <div class="dm-msg-cb-wrap" style="display:${groupChatSelectionMode ? 'flex' : 'none'};align-items:center">
+      <input type="checkbox" class="dm-msg-cb chat-msg-select" data-id="${m.id}" aria-label="Mesajı seç" ${groupChatSelection.has(String(m.id)) ? 'checked' : ''} />
     </div>
+    ${!isOwn
+      ? `<a href="${profileLink}" data-link class="dm-msg-avatar-link" aria-label="${escHtml(displayName)} profili">${avatarMarkup}</a>`
+      : ''}
+    <div class="dm-msg-content">
+      ${!isOwn
+        ? (m.username ? `<a href="${profileLink}" data-link class="dm-msg-sender" style="${m.name_color ? `color:${escHtml(m.name_color)}` : ''}">${escHtml(displayName)}</a>` : `<span class="dm-msg-sender is-deleted">${escHtml(displayName)}</span>`)
+        : ''}
+      ${m.reply_to_id && (m.reply_content || m.reply_image_url)
+        ? `<div class="dm-reply-preview">
+             <span style="color:var(--text-muted);font-size:11px;font-weight:600">${escHtml(m.reply_username || 'Silinmiş kullanıcı')}</span>
+             <div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml((m.reply_content || 'Fotoğraf').slice(0, 60))}</div>
+           </div>`
+        : ''}
+      <div class="dm-msg-bubble${m.edited_at ? ' is-edited' : ''}">${bubbleContent}</div>
+      <div class="dm-msg-meta">
+        <time class="dm-msg-time chat-msg-time" datetime="${escHtml(String(m.created_at || ''))}" title="${escHtml(dmFullTimestamp(m.created_at))}">${escHtml(dmClockTime(m.created_at))}</time>
+        ${currentUser ? `<button class="dm-msg-menu-btn msg-menu-trigger btn btn-ghost" data-id="${m.id}" data-own="${isOwn ? 1 : 0}" title="Mesaj seçenekleri" style="padding:0 4px;font-size:12px;color:var(--text-muted)"><i class="fas fa-ellipsis-h"></i></button>` : ''}
+      </div>
+    </div>
+    <button class="edit-msg" data-id="${m.id}" data-content="${escHtml(m.content || '')}" style="display:none"></button>
   </div>`;
 }
 
@@ -15459,6 +15482,9 @@ async function init() {
     applyDefaultAvatar(ps.default_avatar_url);
     applyDefaultAvatarSize(ps.default_avatar_size);
     document.body.classList.toggle('beta-mode-enabled', ps.beta_mode_enabled !== '0');
+    // Hızlı kayıt admin'den kapatıldıysa kayıt ekranındaki "Hızlıca Doldur" gizlenir.
+    window.quickRegisterEnabled = ps.quick_registration_enabled !== '0';
+    document.body.classList.toggle('quick-register-hidden', ps.quick_registration_enabled === '0');
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     loginRequiredEnabled = ps.first_visit_auth === '1';
     mobileHomeAuthRequired = ps.mobile_home_auth_required === '1';
@@ -28130,18 +28156,18 @@ function groupChatApplyContinuation(container) {
   if (!root) return;
   let previousSender = null;
   let previousTime = 0;
-  root.querySelectorAll(':scope > .chat-msg').forEach(row => {
+  root.querySelectorAll(':scope > .dm-msg-wrap').forEach(row => {
     if (row.classList.contains('deleted-for-me')) {
       previousSender = null;
-      row.classList.remove('chat-continued');
+      row.classList.remove('dm-continued');
       return;
     }
     const sender = row.dataset.userId || '';
-    const stamp = Date.parse(row.querySelector('.chat-msg-time')?.getAttribute('datetime') || '') || 0;
-    // Aynı kişi ve 5 dakikadan kısa aralık -> devam mesajı
+    const stamp = Date.parse(row.querySelector('.dm-msg-time')?.getAttribute('datetime') || '') || 0;
+    // Aynı kişi ve 5 dakikadan kısa aralık -> devam mesajı (avatar/ad gizlenir)
     const isContinued = Boolean(sender) && sender === previousSender
       && (!stamp || !previousTime || Math.abs(stamp - previousTime) < 5 * 60 * 1000);
-    row.classList.toggle('chat-continued', isContinued);
+    row.classList.toggle('dm-continued', isContinued);
     previousSender = sender;
     previousTime = stamp || previousTime;
   });
